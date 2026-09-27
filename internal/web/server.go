@@ -3,6 +3,7 @@ package web
 import (
 	"embed"
 	"encoding/json"
+	"fmt"
 	"io"
 	"io/fs"
 	"net/http"
@@ -31,7 +32,6 @@ func New(mgr *service.Manager) *Server {
 func (s *Server) routes() {
 	sub, _ := fs.Sub(staticFS, "static")
 	s.Mux.Handle("/", http.FileServer(http.FS(sub)))
-
 	s.Mux.HandleFunc("/api/status", s.handleStatus)
 	s.Mux.HandleFunc("/api/config", s.handleConfig)
 	s.Mux.HandleFunc("/api/config/yaml", s.handleConfigYAML)
@@ -41,16 +41,16 @@ func (s *Server) routes() {
 	s.Mux.HandleFunc("/api/generate", s.handleGenerate)
 	s.Mux.HandleFunc("/api/apply-nft", s.handleApplyNft)
 	s.Mux.HandleFunc("/api/update-resources", s.handleUpdateResources)
+	s.Mux.HandleFunc("/api/nodes/main", s.handleSetMainNode)
+	s.Mux.HandleFunc("/api/nodes/delete", s.handleDeleteNode)
+	s.Mux.HandleFunc("/api/subscriptions", s.handleSubscriptions)
+	s.Mux.HandleFunc("/api/subscriptions/update", s.handleSubUpdate)
 }
 
-func (s *Server) Handler() http.Handler {
-	return s.cors(s.Mux)
-}
-
+func (s *Server) Handler() http.Handler { return s.cors(s.Mux) }
 func (s *Server) ListenAndServe(addr string) error {
 	return http.ListenAndServe(addr, s.Handler())
 }
-
 func (s *Server) Wrap(user, pass string) http.Handler {
 	h := s.Handler()
 	if user == "" {
@@ -58,11 +58,10 @@ func (s *Server) Wrap(user, pass string) http.Handler {
 	}
 	return BasicAuth(user, pass, h)
 }
-
 func (s *Server) cors(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Access-Control-Allow-Origin", "*")
-		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, OPTIONS")
+		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
 		w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
 		if r.Method == http.MethodOptions {
 			w.WriteHeader(http.StatusNoContent)
@@ -71,17 +70,14 @@ func (s *Server) cors(next http.Handler) http.Handler {
 		next.ServeHTTP(w, r)
 	})
 }
-
 func writeJSON(w http.ResponseWriter, code int, v any) {
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
 	w.WriteHeader(code)
 	_ = json.NewEncoder(w).Encode(v)
 }
-
 func writeErr(w http.ResponseWriter, code int, err error) {
 	writeJSON(w, code, map[string]string{"error": err.Error()})
 }
-
 func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
@@ -89,7 +85,6 @@ func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
 	}
 	writeJSON(w, http.StatusOK, s.Mgr.Status())
 }
-
 func (s *Server) handleConfig(w http.ResponseWriter, r *http.Request) {
 	switch r.Method {
 	case http.MethodGet:
@@ -116,7 +111,6 @@ func (s *Server) handleConfig(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 	}
 }
-
 func (s *Server) handleConfigYAML(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPut {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
@@ -140,7 +134,6 @@ func (s *Server) handleConfigYAML(w http.ResponseWriter, r *http.Request) {
 	}
 	writeJSON(w, http.StatusOK, map[string]string{"ok": "saved"})
 }
-
 func (s *Server) handleStart(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
@@ -152,7 +145,6 @@ func (s *Server) handleStart(w http.ResponseWriter, r *http.Request) {
 	}
 	writeJSON(w, http.StatusOK, map[string]string{"ok": "started"})
 }
-
 func (s *Server) handleStop(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
@@ -172,7 +164,6 @@ func (s *Server) handleStop(w http.ResponseWriter, r *http.Request) {
 	}
 	writeJSON(w, http.StatusOK, map[string]string{"ok": "stopped"})
 }
-
 func (s *Server) handleRestart(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
@@ -184,7 +175,6 @@ func (s *Server) handleRestart(w http.ResponseWriter, r *http.Request) {
 	}
 	writeJSON(w, http.StatusOK, map[string]string{"ok": "restarted"})
 }
-
 func (s *Server) handleGenerate(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
@@ -196,7 +186,6 @@ func (s *Server) handleGenerate(w http.ResponseWriter, r *http.Request) {
 	}
 	writeJSON(w, http.StatusOK, map[string]string{"ok": "generated"})
 }
-
 func (s *Server) handleApplyNft(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
@@ -208,7 +197,6 @@ func (s *Server) handleApplyNft(w http.ResponseWriter, r *http.Request) {
 	}
 	writeJSON(w, http.StatusOK, map[string]string{"ok": "applied"})
 }
-
 func (s *Server) handleUpdateResources(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
@@ -220,7 +208,90 @@ func (s *Server) handleUpdateResources(w http.ResponseWriter, r *http.Request) {
 	}
 	writeJSON(w, http.StatusOK, map[string]string{"ok": "updated"})
 }
-
+func (s *Server) handleSetMainNode(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	var req struct {
+		Name string `json:"name"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.Name == "" {
+		writeErr(w, http.StatusBadRequest, fmt.Errorf("name required"))
+		return
+	}
+	if err := s.Mgr.SetMainNode(req.Name); err != nil {
+		writeErr(w, http.StatusBadRequest, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"ok": "main_node set"})
+}
+func (s *Server) handleDeleteNode(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	var req struct {
+		Name string `json:"name"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.Name == "" {
+		writeErr(w, http.StatusBadRequest, fmt.Errorf("name required"))
+		return
+	}
+	if err := s.Mgr.DeleteNode(req.Name); err != nil {
+		writeErr(w, http.StatusBadRequest, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"ok": "deleted"})
+}
+func (s *Server) handleSubscriptions(w http.ResponseWriter, r *http.Request) {
+	switch r.Method {
+	case http.MethodPost:
+		var sub config.Subscription
+		if err := json.NewDecoder(r.Body).Decode(&sub); err != nil {
+			writeErr(w, http.StatusBadRequest, err)
+			return
+		}
+		if err := s.Mgr.AddSubscription(sub); err != nil {
+			writeErr(w, http.StatusBadRequest, err)
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]string{"ok": "added"})
+	case http.MethodDelete:
+		var req struct {
+			Name string `json:"name"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.Name == "" {
+			writeErr(w, http.StatusBadRequest, fmt.Errorf("name required"))
+			return
+		}
+		if err := s.Mgr.RemoveSubscription(req.Name); err != nil {
+			writeErr(w, http.StatusBadRequest, err)
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]string{"ok": "removed"})
+	default:
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+	}
+}
+func (s *Server) handleSubUpdate(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	var req struct {
+		Name    string `json:"name"`
+		Replace bool   `json:"replace"`
+	}
+	_ = json.NewDecoder(r.Body).Decode(&req)
+	n, err := s.Mgr.UpdateSubscription(req.Name, req.Replace)
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, err)
+		return
+	}
+	_ = s.Mgr.ReloadConfig()
+	writeJSON(w, http.StatusOK, map[string]any{"ok": "updated", "nodes_added": n})
+}
 func BasicAuth(user, pass string, next http.Handler) http.Handler {
 	if user == "" {
 		return next
@@ -235,7 +306,6 @@ func BasicAuth(user, pass string, next http.Handler) http.Handler {
 		next.ServeHTTP(w, r)
 	})
 }
-
 func ParseListen(addr string) string {
 	addr = strings.TrimSpace(addr)
 	if addr == "" {
