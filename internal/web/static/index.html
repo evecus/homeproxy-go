@@ -41,6 +41,7 @@ table{width:100%;border-collapse:collapse;font-size:.85rem}th,td{text-align:left
 <button type="button" data-t="client">客户端</button>
 <button type="button" data-t="nodes">节点</button>
 <button type="button" data-t="subs">订阅</button>
+<button type="button" data-t="rules">路由规则</button>
 <button type="button" data-t="acl">访问控制</button>
 <button type="button" data-t="tools">工具</button>
 </div>
@@ -58,6 +59,9 @@ table{width:100%;border-collapse:collapse;font-size:.85rem}th,td{text-align:left
 <p>路由模式 <b id="sm">—</b></p>
 <p>透明代理 <b id="sp">—</b></p>
 <p>主节点 <b id="sn">—</b></p>
+<p>UDP节点 <b id="sudp">—</b></p>
+<p>节点 <b id="snodes">0</b> · 订阅 <b id="ssubs">0</b> · 规则 <b id="srules">0</b></p>
+<p>资源: IP4 <b id="sip4">—</b> IP6 <b id="sip6">—</b> GFW <b id="sgfw">—</b></p>
 <p class="hint" id="spath"></p></div>
 </div></div>
 
@@ -77,6 +81,12 @@ table{width:100%;border-collapse:collapse;font-size:.85rem}th,td{text-align:left
 <select id="pmode"><option value="tproxy">TProxy</option><option value="redirect">Redirect</option><option value="tun">TUN</option></select>
 <label>主节点</label>
 <select id="mnode"><option value="">—</option></select>
+<label>主 UDP 节点</label>
+<select id="mudp"><option value="same">与主节点相同</option><option value="urltest">urltest</option></select>
+<label>URLTest 节点（逗号分隔名称，空=全部）</label>
+<input id="utnodes" placeholder="node1,node2"/>
+<label>URLTest 间隔(秒) / 容差(ms)</label>
+<div class="row"><input id="utint" type="number" style="width:48%" value="180"/><input id="uttol" type="number" style="width:48%" value="50"/></div>
 <label>IPv6</label>
 <select id="ipv6"><option value="0">关闭</option><option value="1">开启</option></select>
 </div>
@@ -132,6 +142,33 @@ table{width:100%;border-collapse:collapse;font-size:.85rem}th,td{text-align:left
 </div>
 </div></div>
 
+
+<div id="rules" class="panel">
+<div class="card"><h2>自定义路由规则（对应 sing-box route rules）</h2>
+<p class="hint">启用的规则优先于路由模式。出站: main-out / direct-out / block-out / main-udp-out</p>
+<table><thead><tr><th>名称</th><th>出站</th><th>匹配</th><th>启用</th><th></th></tr></thead>
+<tbody id="rt"></tbody></table>
+<div class="msg" id="rmsg"></div>
+</div>
+<div class="card"><h2>添加规则</h2>
+<div class="grid2">
+<div>
+<label>名称</label><input id="rname"/>
+<label>出站</label>
+<select id="rout"><option>main-out</option><option>direct-out</option><option>block-out</option><option>main-udp-out</option></select>
+<label>域名（每行一个）</label><textarea id="rdom"></textarea>
+<label>域名后缀</label><textarea id="rsuf"></textarea>
+</div>
+<div>
+<label>IP CIDR</label><textarea id="rip"></textarea>
+<label>源 IP CIDR</label><textarea id="rsip"></textarea>
+<label>端口（逗号，如 443,80）</label><input id="rport"/>
+<label>网络</label><select id="rnet"><option value="">全部</option><option>tcp</option><option>udp</option></select>
+</div>
+</div>
+<button type="button" id="bAddRule">添加规则</button>
+</div></div>
+
 <div id="acl" class="panel">
 <div class="card"><h2>访问控制 / 黑白名单</h2>
 <label>LAN 代理过滤模式</label>
@@ -160,6 +197,12 @@ table{width:100%;border-collapse:collapse;font-size:.85rem}th,td{text-align:left
 <textarea id="wanD4" placeholder="1.1.1.1/32"></textarea>
 <label>WAN 强制代理目标 CIDR</label>
 <textarea id="wanP4"></textarea>
+<label>游戏模式 IPv4（始终直连）</label>
+<textarea id="game4"></textarea>
+<label>游戏模式 MAC</label>
+<textarea id="gameM"></textarea>
+<label>全局代理设备 IPv4</label>
+<textarea id="gproxy4"></textarea>
 </div>
 </div>
 <button type="button" id="bSaveACL">保存访问控制</button>
@@ -189,7 +232,7 @@ const join=a=>(a||[]).join('\n');
 async function api(p,o={}){const r=await fetch('/api'+p,{headers:{'Content-Type':'application/json'},...o});const d=await r.json().catch(()=>({}));if(!r.ok)throw new Error(d.error||r.statusText);return d}
 document.querySelectorAll('.tabs button').forEach(b=>b.onclick=()=>{document.querySelectorAll('.tabs button').forEach(x=>x.classList.remove('active'));document.querySelectorAll('.panel').forEach(x=>x.classList.remove('active'));b.classList.add('active');$(b.dataset.t).classList.add('active')});
 
-async function refresh(){try{const s=await api('/status');const b=$('badge');if(s.running){b.textContent='● 运行中 PID '+s.pid;b.className='badge on';$('rs').textContent='运行中'}else{b.textContent='● 已停止';b.className='badge';$('rs').textContent='已停止'}$('sm').textContent=s.mode||'—';$('sp').textContent=s.proxy_mode||'—';$('sn').textContent=s.main_node||'—';$('spath').textContent=s.config_path||''}catch(e){msg($('om'),e.message,0)}}
+async function refresh(){try{const s=await api('/status');const b=$('badge');if(s.running){b.textContent='● 运行中 PID '+s.pid;b.className='badge on';$('rs').textContent='运行中'}else{b.textContent='● 已停止';b.className='badge';$('rs').textContent='已停止'}$('sm').textContent=s.mode||'—';$('sp').textContent=s.proxy_mode||'—';$('sn').textContent=s.main_node||'—';const u=$('sudp');if(u)u.textContent=s.main_udp_node||'same';const a=$('snodes');if(a)a.textContent=s.nodes||0;const b=$('ssubs');if(b)b.textContent=s.subscriptions||0;const c=$('srules');if(c)c.textContent=s.rules||0;const d=$('sip4');if(d)d.textContent=s.china_ip4_ready?'OK':'缺';const e=$('sip6');if(e)e.textContent=s.china_ip6_ready?'OK':'缺';const f=$('sgfw');if(f)f.textContent=s.gfw_list_ready?'OK':'缺';$('spath').textContent=s.config_path||''}catch(e){msg($('om'),e.message,0)}}
 
 function fillNodesSelect(nodes,main){
   const sel=$('mnode');sel.innerHTML='';
@@ -197,6 +240,7 @@ function fillNodesSelect(nodes,main){
   const ou=document.createElement('option');ou.value='urltest';ou.textContent='urltest（自动测速）';sel.appendChild(ou);
   (nodes||[]).forEach(n=>{const o=document.createElement('option');o.value=n.name;o.textContent=n.name+' ('+n.type+')';sel.appendChild(o)});
   if(main)sel.value=main;
+const mudp=$('mudp');if(mudp){const cur=mudp.value;mudp.innerHTML='';[['same','与主节点相同'],['urltest','urltest']].forEach(([v,t])=>{const o=document.createElement('option');o.value=v;o.textContent=t;mudp.appendChild(o)});(nodes||[]).forEach(n=>{const o=document.createElement('option');o.value=n.name;o.textContent=n.name;mudp.appendChild(o)});}
 }
 
 function fill(c){
@@ -232,6 +276,22 @@ function fill(c){
     d.onclick=async()=>{try{await api('/subscriptions',{method:'DELETE',body:JSON.stringify({name:s.name})});msg($('submsg'),'已删除订阅',1);await loadCfg()}catch(e){msg($('submsg'),e.message,0)}};
     td.appendChild(u);td.appendChild(d);st.appendChild(tr);
   });
+  
+  if($('mudp')&&c.proxy){ $('mudp').value=c.proxy.main_udp_node||'same'; }
+  if($('utnodes')&&c.proxy){ $('utnodes').value=(c.proxy.urltest_nodes||[]).join(','); }
+  if($('utint')&&c.proxy){ $('utint').value=c.proxy.urltest_interval||180; }
+  if($('uttol')&&c.proxy){ $('uttol').value=c.proxy.urltest_tolerance||50; }
+  if($('game4')&&c.control){ $('game4').value=join(c.control.lan_gaming_ipv4); $('gameM').value=join(c.control.lan_gaming_mac); $('gproxy4').value=join(c.control.lan_global_proxy_ipv4); }
+  const rt=$('rt'); if(rt){ rt.innerHTML=''; (c.rules||[]).forEach((r,i)=>{
+    const tr=document.createElement('tr');
+    const match=[...(r.domain||[]),...(r.domain_suffix||[]),...(r.ip_cidr||[])].slice(0,3).join(',')||'—';
+    tr.innerHTML=`<td>${r.name||('#'+i)}</td><td>${r.outbound||''}</td><td>${match}</td><td>${r.enabled?'是':'否'}</td><td></td>`;
+    const td=tr.lastChild;
+    const bd=document.createElement('button'); bd.type='button'; bd.className='sm er'; bd.textContent='删除';
+    bd.onclick=async()=>{ const c2=baseClient(); c2.rules=(c2.rules||[]).filter((_,j)=>j!==i); try{ await api('/config',{method:'PUT',body:JSON.stringify(c2)}); msg($('rmsg'),'已删除',1); await loadCfg();}catch(e){msg($('rmsg'),e.message,0)} };
+    td.appendChild(bd); rt.appendChild(tr);
+  }); }
+
   const ctl=c.control||{};
   $('lpm').value=ctl.lan_proxy_mode||'all';
   $('lanD4').value=join(ctl.lan_direct_ipv4);
@@ -275,6 +335,7 @@ $('bAdd').onclick=async()=>{try{const c=baseClient();c.nodes=c.nodes||[];const t
 $('bAddSub').onclick=async()=>{try{await api('/subscriptions',{method:'POST',body:JSON.stringify({name:$('subName').value.trim(),url:$('subURL').value.trim(),enabled:true})});msg($('submsg'),'订阅已添加，请点「更新」拉取节点',1);$('subName').value='';$('subURL').value='';await loadCfg()}catch(e){msg($('submsg'),e.message,0)}};
 $('bUpAll').onclick=async()=>{try{msg($('submsg'),'更新全部…',1);const r=await api('/subscriptions/update',{method:'POST',body:JSON.stringify({name:'',replace:true})});msg($('submsg'),'完成，节点变化 '+r.nodes_added,1);await loadCfg()}catch(e){msg($('submsg'),e.message,0)}};
 
+$('bAddRule')&&($('bAddRule').onclick=async()=>{try{const c=baseClient();c.rules=c.rules||[];const ports=($('rport').value||'').split(',').map(s=>s.trim()).filter(Boolean).map(Number).filter(n=>n>0);c.rules.push({name:$('rname').value.trim()||'rule',enabled:true,outbound:$('rout').value,domain:lines($('rdom').value),domain_suffix:lines($('rsuf').value),ip_cidr:lines($('rip').value),source_ip_cidr:lines($('rsip').value),port:ports,network:$('rnet').value});await api('/config',{method:'PUT',body:JSON.stringify(c)});msg($('rmsg'),'已添加',1);await loadCfg();}catch(e){msg($('rmsg'),e.message,0)}});
 $('bSaveACL').onclick=async()=>{try{const c=baseClient();c.control=c.control||{};c.control.lan_proxy_mode=$('lpm').value;c.control.lan_direct_ipv4=lines($('lanD4').value);c.control.lan_direct_mac=lines($('lanDM').value);c.control.lan_proxy_ipv4=lines($('lanP4').value);c.control.lan_proxy_mac=lines($('lanPM').value);c.control.proxy_domains=lines($('domP').value);c.control.direct_domains=lines($('domD').value);c.control.wan_direct_ipv4=lines($('wanD4').value);c.control.wan_proxy_ipv4=lines($('wanP4').value);await api('/config',{method:'PUT',body:JSON.stringify(c)});msg($('am'),'访问控制已保存（重启代理后生效）',1);await loadCfg()}catch(e){msg($('am'),e.message,0)}};
 
 $('bGen').onclick=async()=>{try{await api('/generate',{method:'POST'});msg($('tm'),'已生成',1)}catch(e){msg($('tm'),e.message,0)}};
