@@ -8,7 +8,6 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-// Routing modes aligned with OpenWrt homeproxy.
 const (
 	ModeGFWList             = "gfwlist"
 	ModeBypassMainlandChina = "bypass_mainland_china"
@@ -17,66 +16,87 @@ const (
 	ModeCustom              = "custom"
 )
 
-// Proxy modes for transparent interception.
 const (
 	ProxyTProxy   = "tproxy"
 	ProxyRedirect = "redirect"
 	ProxyTUN      = "tun"
 )
 
-// Config is the top-level YAML configuration.
 type Config struct {
-	Mode    string          `yaml:"mode"`
-	Proxy   ProxyConfig     `yaml:"proxy"`
-	DNS     DNSConfig       `yaml:"dns"`
-	Nodes   []Node          `yaml:"nodes"`
-	Subs    []Subscription  `yaml:"subscriptions"`
-	Control ControlConfig   `yaml:"control"`
-	Paths   PathsConfig     `yaml:"paths"`
-	Log     LogConfig       `yaml:"log"`
+	Mode    string         `yaml:"mode"`
+	Proxy   ProxyConfig    `yaml:"proxy"`
+	DNS     DNSConfig      `yaml:"dns"`
+	Nodes   []Node         `yaml:"nodes"`
+	Subs    []Subscription `yaml:"subscriptions"`
+	Rules   []RouteRule    `yaml:"rules"`
+	Control ControlConfig  `yaml:"control"`
+	Paths   PathsConfig    `yaml:"paths"`
+	Log     LogConfig      `yaml:"log"`
+}
+
+type RouteRule struct {
+	Name          string   `yaml:"name,omitempty"`
+	Enabled       bool     `yaml:"enabled"`
+	Outbound      string   `yaml:"outbound"`
+	Domain        []string `yaml:"domain,omitempty"`
+	DomainSuffix  []string `yaml:"domain_suffix,omitempty"`
+	DomainKeyword []string `yaml:"domain_keyword,omitempty"`
+	IPCIDR        []string `yaml:"ip_cidr,omitempty"`
+	SourceIPCIDR  []string `yaml:"source_ip_cidr,omitempty"`
+	Port          []int    `yaml:"port,omitempty"`
+	Network       string   `yaml:"network,omitempty"`
+	Protocol      []string `yaml:"protocol,omitempty"`
 }
 
 type ProxyConfig struct {
-	Mode     string `yaml:"mode"`
-	MainNode string `yaml:"main_node"`
-	MainUDP  string `yaml:"main_udp_node"`
+	Mode             string   `yaml:"mode"`
+	MainNode         string   `yaml:"main_node"`
+	MainUDP          string   `yaml:"main_udp_node"`
 	URLTestNodes     []string `yaml:"urltest_nodes"`
+	URLTestUDPNodes  []string `yaml:"urltest_udp_nodes"`
 	URLTestInterval  int      `yaml:"urltest_interval"`
 	URLTestTolerance int      `yaml:"urltest_tolerance"`
-	MixedPort    int    `yaml:"mixed_port"`
-	TProxyPort   int    `yaml:"tproxy_port"`
-	RedirectPort int    `yaml:"redirect_port"`
-	TProxyMark   string `yaml:"tproxy_mark"`
-	SelfMark     string `yaml:"self_mark"`
-	TUNName  string `yaml:"tun_name"`
-	TUNAddr4 string `yaml:"tun_addr4"`
-	TUNAddr6 string `yaml:"tun_addr6"`
-	TUNMTU   int    `yaml:"tun_mtu"`
-	IPv6     bool   `yaml:"ipv6"`
+	MixedPort        int      `yaml:"mixed_port"`
+	TProxyPort       int      `yaml:"tproxy_port"`
+	RedirectPort     int      `yaml:"redirect_port"`
+	TProxyMark       string   `yaml:"tproxy_mark"`
+	SelfMark         string   `yaml:"self_mark"`
+	TUNName          string   `yaml:"tun_name"`
+	TUNAddr4         string   `yaml:"tun_addr4"`
+	TUNAddr6         string   `yaml:"tun_addr6"`
+	TUNMTU           int      `yaml:"tun_mtu"`
+	IPv6             bool     `yaml:"ipv6"`
 }
 
 type DNSConfig struct {
-	ListenPort   int    `yaml:"listen_port"`
-	Server       string `yaml:"server"`
-	ChinaServer  string `yaml:"china_server"`
-	Strategy     string `yaml:"strategy"`
-	FakeIP       bool   `yaml:"fakeip"`
-	FakeIPRange4 string `yaml:"fakeip_range4"`
-	FakeIPRange6 string `yaml:"fakeip_range6"`
+	ListenPort   int         `yaml:"listen_port"`
+	Server       string      `yaml:"server"`
+	ChinaServer  string      `yaml:"china_server"`
+	Strategy     string      `yaml:"strategy"`
+	FakeIP       bool        `yaml:"fakeip"`
+	FakeIPRange4 string      `yaml:"fakeip_range4"`
+	FakeIPRange6 string      `yaml:"fakeip_range6"`
+	ExtraServers []DNSServer `yaml:"extra_servers,omitempty"`
+}
+
+type DNSServer struct {
+	Tag     string `yaml:"tag"`
+	Address string `yaml:"address"`
+	Detour  string `yaml:"detour"`
 }
 
 type Node struct {
-	Name      string          `yaml:"name"`
-	Type      string          `yaml:"type"`
-	Server    string          `yaml:"server"`
-	Port      int             `yaml:"port"`
-	UUID      string          `yaml:"uuid,omitempty"`
-	Password  string          `yaml:"password,omitempty"`
-	Method    string          `yaml:"method,omitempty"`
-	Network   string          `yaml:"network,omitempty"`
-	TLS       *TLSConfig      `yaml:"tls,omitempty"`
-	Transport map[string]any  `yaml:"transport,omitempty"`
-	Extra     map[string]any  `yaml:"extra,omitempty"`
+	Name      string         `yaml:"name"`
+	Type      string         `yaml:"type"`
+	Server    string         `yaml:"server"`
+	Port      int            `yaml:"port"`
+	UUID      string         `yaml:"uuid,omitempty"`
+	Password  string         `yaml:"password,omitempty"`
+	Method    string         `yaml:"method,omitempty"`
+	Network   string         `yaml:"network,omitempty"`
+	TLS       *TLSConfig     `yaml:"tls,omitempty"`
+	Transport map[string]any `yaml:"transport,omitempty"`
+	Extra     map[string]any `yaml:"extra,omitempty"`
 }
 
 type TLSConfig struct {
@@ -101,22 +121,28 @@ const (
 )
 
 type ControlConfig struct {
-	LANInterfaces []string `yaml:"lan_interfaces"`
-	LANProxyMode  string   `yaml:"lan_proxy_mode"`
-	LANProxyIPv4  []string `yaml:"lan_proxy_ipv4"`
-	LANProxyIPv6  []string `yaml:"lan_proxy_ipv6"`
-	LANProxyMAC   []string `yaml:"lan_proxy_mac"`
-	LANDirectIPv4 []string `yaml:"lan_direct_ipv4"`
-	LANDirectIPv6 []string `yaml:"lan_direct_ipv6"`
-	LANDirectMAC  []string `yaml:"lan_direct_mac"`
-	ProxyDomains  []string `yaml:"proxy_domains"`
-	DirectDomains []string `yaml:"direct_domains"`
-	WANDirectIPv4 []string `yaml:"wan_direct_ipv4"`
-	WANDirectIPv6 []string `yaml:"wan_direct_ipv6"`
-	WANProxyIPv4  []string `yaml:"wan_proxy_ipv4"`
-	WANProxyIPv6  []string `yaml:"wan_proxy_ipv6"`
-	RoutingPorts    string `yaml:"routing_ports"`
-	BypassCNTraffic bool   `yaml:"bypass_cn_traffic"`
+	LANInterfaces       []string `yaml:"lan_interfaces"`
+	LANProxyMode        string   `yaml:"lan_proxy_mode"`
+	LANProxyIPv4        []string `yaml:"lan_proxy_ipv4"`
+	LANProxyIPv6        []string `yaml:"lan_proxy_ipv6"`
+	LANProxyMAC         []string `yaml:"lan_proxy_mac"`
+	LANDirectIPv4       []string `yaml:"lan_direct_ipv4"`
+	LANDirectIPv6       []string `yaml:"lan_direct_ipv6"`
+	LANDirectMAC        []string `yaml:"lan_direct_mac"`
+	ProxyDomains        []string `yaml:"proxy_domains"`
+	DirectDomains       []string `yaml:"direct_domains"`
+	LANGamingIPv4       []string `yaml:"lan_gaming_ipv4"`
+	LANGamingIPv6       []string `yaml:"lan_gaming_ipv6"`
+	LANGamingMAC        []string `yaml:"lan_gaming_mac"`
+	LANGlobalProxyIPv4  []string `yaml:"lan_global_proxy_ipv4"`
+	LANGlobalProxyIPv6  []string `yaml:"lan_global_proxy_ipv6"`
+	LANGlobalProxyMAC   []string `yaml:"lan_global_proxy_mac"`
+	WANDirectIPv4       []string `yaml:"wan_direct_ipv4"`
+	WANDirectIPv6       []string `yaml:"wan_direct_ipv6"`
+	WANProxyIPv4        []string `yaml:"wan_proxy_ipv4"`
+	WANProxyIPv6        []string `yaml:"wan_proxy_ipv6"`
+	RoutingPorts        string   `yaml:"routing_ports"`
+	BypassCNTraffic     bool     `yaml:"bypass_cn_traffic"`
 }
 
 type PathsConfig struct {
@@ -276,14 +302,10 @@ func (c *Config) FindNode(name string) *Node {
 }
 
 func (c *Config) ModeNeedsChinaIP() bool {
-	return c.Mode == ModeBypassMainlandChina ||
-		c.Mode == ModeProxyMainlandChina ||
-		c.Control.BypassCNTraffic
+	return c.Mode == ModeBypassMainlandChina || c.Mode == ModeProxyMainlandChina || c.Control.BypassCNTraffic
 }
 
-func (c *Config) ModeNeedsGFWList() bool {
-	return c.Mode == ModeGFWList
-}
+func (c *Config) ModeNeedsGFWList() bool { return c.Mode == ModeGFWList }
 
 func NormalizeMark(s string) string {
 	s = strings.TrimSpace(s)
