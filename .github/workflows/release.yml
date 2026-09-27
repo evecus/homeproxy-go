@@ -1,0 +1,96 @@
+name: Build & Release
+
+on:
+  push:
+    branches: [main, master]
+    tags: ["v*"]
+  pull_request:
+    branches: [main, master]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: Build
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - goos: linux
+            goarch: amd64
+          - goos: linux
+            goarch: arm64
+          - goos: linux
+            goarch: arm
+            goarm: "7"
+          - goos: linux
+            goarch: 386
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.22.x"
+
+      - name: Build
+        env:
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+          GOARM: ${{ matrix.goarm }}
+          CGO_ENABLED: "0"
+        run: |
+          EXT=""
+          SUFFIX="${GOOS}-${GOARCH}"
+          if [ -n "${GOARM}" ]; then
+            SUFFIX="${SUFFIX}v${GOARM}"
+          fi
+          mkdir -p dist
+          go build -trimpath -ldflags="-s -w -X main.version=${GITHUB_REF_NAME:-dev}" \
+            -o "dist/homeproxy-${SUFFIX}${EXT}" ./cmd/homeproxy
+          ls -la dist/
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: homeproxy-${{ matrix.goos }}-${{ matrix.goarch }}${{ matrix.goarm && format('v{0}', matrix.goarm) || '' }}
+          path: dist/*
+          if-no-files-found: error
+
+  release:
+    name: Release
+    needs: build
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/')
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Pack
+        run: |
+          mkdir -p release
+          find artifacts -type f -name 'homeproxy-*' -exec cp {} release/ \;
+          cd release
+          for f in homeproxy-*; do
+            tar -czf "${f}.tar.gz" "$f"
+            sha256sum "${f}.tar.gz" >> checksums.txt
+          done
+          ls -la
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: release/*
+          generate_release_notes: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

@@ -1,0 +1,67 @@
+# homeproxy-go example configuration (Debian side router)
+
+# Routing mode:
+#   gfwlist | bypass_mainland_china | proxy_mainland_china | global | custom
+mode: bypass_mainland_china
+
+proxy:
+  mode: tproxy          # tproxy | redirect | tun
+  main_node: my-ss      # node name, or "urltest"
+  # urltest_nodes: [my-ss, my-trojan]
+  # urltest_interval: 180
+  # urltest_tolerance: 50
+  mixed_port: 5330
+  tproxy_port: 5332
+  redirect_port: 5331
+  tproxy_mark: "0x65"   # 101
+  self_mark: "100"
+  ipv6: false
+  # tun_name: singtun0
+  # tun_addr4: 172.19.0.1/30
+
+dns:
+  listen_port: 5333
+  server: 8.8.8.8           # remote DNS (via proxy)
+  china_server: 223.5.5.5   # used when mode=bypass_mainland_china
+  strategy: prefer_ipv4
+  fakeip: false
+
+nodes:
+  - name: my-ss
+    type: shadowsocks
+    server: 203.0.113.10
+    port: 8388
+    method: aes-128-gcm
+    password: "change-me"
+
+  # - name: my-trojan
+  #   type: trojan
+  #   server: example.com
+  #   port: 443
+  #   password: "change-me"
+  #   tls:
+  #     enabled: true
+  #     server_name: example.com
+
+subscriptions: []
+  # - name: provider1
+  #   url: https://example.com/sub
+  #   enabled: true
+  #   update_interval: 6h
+
+control:
+  # LAN interfaces that should be transparently proxied
+  lan_interfaces: [eth1]
+  # lan_direct_ipv4: ["192.168.1.50"]
+  # wan_direct_ipv4: ["1.1.1.1/32"]
+  # routing_ports: "80,443"
+  bypass_cn_traffic: false
+
+paths:
+  data_dir: /var/lib/homeproxy
+  run_dir: /var/run/homeproxy
+  singbox_bin: sing-box
+  # china_ip4_url: https://raw.githubusercontent.com/17mon/china_ip_list/master/china_ip_list.txt
+
+log:
+  level: warn

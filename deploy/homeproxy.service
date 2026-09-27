@@ -1,0 +1,22 @@
+[Unit]
+Description=homeproxy-go transparent proxy (sing-box + nftables)
+Documentation=https://github.com/evecus/homeproxy-go
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+# Generate configs then start sing-box
+ExecStartPre=/usr/local/bin/homeproxy generate -c /etc/homeproxy/config.yaml
+ExecStartPre=/usr/local/bin/homeproxy setup-routing -c /etc/homeproxy/config.yaml
+ExecStartPre=/usr/local/bin/homeproxy apply-nft -c /etc/homeproxy/config.yaml
+ExecStart=/usr/local/bin/sing-box run -c /var/run/homeproxy/sing-box.json
+ExecReload=/bin/kill -HUP $MAINPID
+Restart=on-failure
+RestartSec=3
+LimitNOFILE=1048576
+AmbientCapabilities=CAP_NET_ADMIN CAP_NET_BIND_SERVICE CAP_NET_RAW
+CapabilityBoundingSet=CAP_NET_ADMIN CAP_NET_BIND_SERVICE CAP_NET_RAW
+
+[Install]
+WantedBy=multi-user.target
