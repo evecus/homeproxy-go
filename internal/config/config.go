@@ -8,6 +8,7 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
+// Routing modes aligned with OpenWrt homeproxy.
 const (
 	ModeGFWList             = "gfwlist"
 	ModeBypassMainlandChina = "bypass_mainland_china"
@@ -16,39 +17,42 @@ const (
 	ModeCustom              = "custom"
 )
 
+// Proxy modes for transparent interception.
 const (
 	ProxyTProxy   = "tproxy"
 	ProxyRedirect = "redirect"
 	ProxyTUN      = "tun"
 )
 
+// Config is the top-level YAML configuration.
 type Config struct {
-	Mode    string         `yaml:"mode"`
-	Proxy   ProxyConfig    `yaml:"proxy"`
-	DNS     DNSConfig      `yaml:"dns"`
-	Nodes   []Node         `yaml:"nodes"`
-	Subs    []Subscription `yaml:"subscriptions"`
-	Control ControlConfig  `yaml:"control"`
-	Paths   PathsConfig    `yaml:"paths"`
-	Log     LogConfig      `yaml:"log"`
+	Mode    string          `yaml:"mode"`
+	Proxy   ProxyConfig     `yaml:"proxy"`
+	DNS     DNSConfig       `yaml:"dns"`
+	Nodes   []Node          `yaml:"nodes"`
+	Subs    []Subscription  `yaml:"subscriptions"`
+	Control ControlConfig   `yaml:"control"`
+	Paths   PathsConfig     `yaml:"paths"`
+	Log     LogConfig       `yaml:"log"`
 }
 
 type ProxyConfig struct {
-	Mode             string   `yaml:"mode"`
-	MainNode         string   `yaml:"main_node"`
+	Mode     string `yaml:"mode"`
+	MainNode string `yaml:"main_node"`
+	MainUDP  string `yaml:"main_udp_node"`
 	URLTestNodes     []string `yaml:"urltest_nodes"`
 	URLTestInterval  int      `yaml:"urltest_interval"`
 	URLTestTolerance int      `yaml:"urltest_tolerance"`
-	MixedPort        int      `yaml:"mixed_port"`
-	TProxyPort       int      `yaml:"tproxy_port"`
-	RedirectPort     int      `yaml:"redirect_port"`
-	TProxyMark       string   `yaml:"tproxy_mark"`
-	SelfMark         string   `yaml:"self_mark"`
-	TUNName          string   `yaml:"tun_name"`
-	TUNAddr4         string   `yaml:"tun_addr4"`
-	TUNAddr6         string   `yaml:"tun_addr6"`
-	TUNMTU           int      `yaml:"tun_mtu"`
-	IPv6             bool     `yaml:"ipv6"`
+	MixedPort    int    `yaml:"mixed_port"`
+	TProxyPort   int    `yaml:"tproxy_port"`
+	RedirectPort int    `yaml:"redirect_port"`
+	TProxyMark   string `yaml:"tproxy_mark"`
+	SelfMark     string `yaml:"self_mark"`
+	TUNName  string `yaml:"tun_name"`
+	TUNAddr4 string `yaml:"tun_addr4"`
+	TUNAddr6 string `yaml:"tun_addr6"`
+	TUNMTU   int    `yaml:"tun_mtu"`
+	IPv6     bool   `yaml:"ipv6"`
 }
 
 type DNSConfig struct {
@@ -62,17 +66,17 @@ type DNSConfig struct {
 }
 
 type Node struct {
-	Name      string         `yaml:"name"`
-	Type      string         `yaml:"type"`
-	Server    string         `yaml:"server"`
-	Port      int            `yaml:"port"`
-	UUID      string         `yaml:"uuid,omitempty"`
-	Password  string         `yaml:"password,omitempty"`
-	Method    string         `yaml:"method,omitempty"`
-	Network   string         `yaml:"network,omitempty"`
-	TLS       *TLSConfig     `yaml:"tls,omitempty"`
-	Transport map[string]any `yaml:"transport,omitempty"`
-	Extra     map[string]any `yaml:"extra,omitempty"`
+	Name      string          `yaml:"name"`
+	Type      string          `yaml:"type"`
+	Server    string          `yaml:"server"`
+	Port      int             `yaml:"port"`
+	UUID      string          `yaml:"uuid,omitempty"`
+	Password  string          `yaml:"password,omitempty"`
+	Method    string          `yaml:"method,omitempty"`
+	Network   string          `yaml:"network,omitempty"`
+	TLS       *TLSConfig      `yaml:"tls,omitempty"`
+	Transport map[string]any  `yaml:"transport,omitempty"`
+	Extra     map[string]any  `yaml:"extra,omitempty"`
 }
 
 type TLSConfig struct {
@@ -90,18 +94,29 @@ type Subscription struct {
 	Enabled        bool   `yaml:"enabled"`
 }
 
+const (
+	LANProxyAll          = "all"
+	LANProxyExceptListed = "except_listed"
+	LANProxyListedOnly   = "listed_only"
+)
+
 type ControlConfig struct {
-	LANInterfaces   []string `yaml:"lan_interfaces"`
-	LANProxyIPv4    []string `yaml:"lan_proxy_ipv4"`
-	LANProxyIPv6    []string `yaml:"lan_proxy_ipv6"`
-	LANDirectIPv4   []string `yaml:"lan_direct_ipv4"`
-	LANDirectIPv6   []string `yaml:"lan_direct_ipv6"`
-	WANDirectIPv4   []string `yaml:"wan_direct_ipv4"`
-	WANDirectIPv6   []string `yaml:"wan_direct_ipv6"`
-	WANProxyIPv4    []string `yaml:"wan_proxy_ipv4"`
-	WANProxyIPv6    []string `yaml:"wan_proxy_ipv6"`
-	RoutingPorts    string   `yaml:"routing_ports"`
-	BypassCNTraffic bool     `yaml:"bypass_cn_traffic"`
+	LANInterfaces []string `yaml:"lan_interfaces"`
+	LANProxyMode  string   `yaml:"lan_proxy_mode"`
+	LANProxyIPv4  []string `yaml:"lan_proxy_ipv4"`
+	LANProxyIPv6  []string `yaml:"lan_proxy_ipv6"`
+	LANProxyMAC   []string `yaml:"lan_proxy_mac"`
+	LANDirectIPv4 []string `yaml:"lan_direct_ipv4"`
+	LANDirectIPv6 []string `yaml:"lan_direct_ipv6"`
+	LANDirectMAC  []string `yaml:"lan_direct_mac"`
+	ProxyDomains  []string `yaml:"proxy_domains"`
+	DirectDomains []string `yaml:"direct_domains"`
+	WANDirectIPv4 []string `yaml:"wan_direct_ipv4"`
+	WANDirectIPv6 []string `yaml:"wan_direct_ipv6"`
+	WANProxyIPv4  []string `yaml:"wan_proxy_ipv4"`
+	WANProxyIPv6  []string `yaml:"wan_proxy_ipv6"`
+	RoutingPorts    string `yaml:"routing_ports"`
+	BypassCNTraffic bool   `yaml:"bypass_cn_traffic"`
 }
 
 type PathsConfig struct {
@@ -123,6 +138,9 @@ func (c *Config) Defaults() {
 	}
 	if c.Proxy.Mode == "" {
 		c.Proxy.Mode = ProxyTProxy
+	}
+	if c.Control.LANProxyMode == "" {
+		c.Control.LANProxyMode = LANProxyAll
 	}
 	if c.Proxy.MixedPort == 0 {
 		c.Proxy.MixedPort = 5330
@@ -248,18 +266,6 @@ func Load(path string) (*Config, error) {
 	return &c, nil
 }
 
-func (c *Config) Save(path string) error {
-	data, err := yaml.Marshal(c)
-	if err != nil {
-		return err
-	}
-	tmp := path + ".tmp"
-	if err := os.WriteFile(tmp, data, 0o644); err != nil {
-		return err
-	}
-	return os.Rename(tmp, path)
-}
-
 func (c *Config) FindNode(name string) *Node {
 	for i := range c.Nodes {
 		if c.Nodes[i].Name == name {
@@ -270,7 +276,9 @@ func (c *Config) FindNode(name string) *Node {
 }
 
 func (c *Config) ModeNeedsChinaIP() bool {
-	return c.Mode == ModeBypassMainlandChina || c.Mode == ModeProxyMainlandChina || c.Control.BypassCNTraffic
+	return c.Mode == ModeBypassMainlandChina ||
+		c.Mode == ModeProxyMainlandChina ||
+		c.Control.BypassCNTraffic
 }
 
 func (c *Config) ModeNeedsGFWList() bool {
@@ -287,4 +295,16 @@ func NormalizeMark(s string) string {
 		return fmt.Sprintf("0x%x", n)
 	}
 	return s
+}
+
+func (c *Config) Save(path string) error {
+	data, err := yaml.Marshal(c)
+	if err != nil {
+		return err
+	}
+	tmp := path + ".tmp"
+	if err := os.WriteFile(tmp, data, 0o644); err != nil {
+		return err
+	}
+	return os.Rename(tmp, path)
 }
