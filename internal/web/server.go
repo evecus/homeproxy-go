@@ -32,6 +32,7 @@ func New(mgr *service.Manager) *Server {
 func (s *Server) routes() {
 	sub, _ := fs.Sub(staticFS, "static")
 	s.Mux.Handle("/", http.FileServer(http.FS(sub)))
+
 	s.Mux.HandleFunc("/api/status", s.handleStatus)
 	s.Mux.HandleFunc("/api/config", s.handleConfig)
 	s.Mux.HandleFunc("/api/config/yaml", s.handleConfigYAML)
@@ -47,10 +48,15 @@ func (s *Server) routes() {
 	s.Mux.HandleFunc("/api/subscriptions/update", s.handleSubUpdate)
 }
 
-func (s *Server) Handler() http.Handler { return s.cors(s.Mux) }
+func (s *Server) Handler() http.Handler {
+	return s.cors(s.Mux)
+}
+
 func (s *Server) ListenAndServe(addr string) error {
 	return http.ListenAndServe(addr, s.Handler())
 }
+
+// Wrap applies optional basic auth around the default handler.
 func (s *Server) Wrap(user, pass string) http.Handler {
 	h := s.Handler()
 	if user == "" {
@@ -58,10 +64,11 @@ func (s *Server) Wrap(user, pass string) http.Handler {
 	}
 	return BasicAuth(user, pass, h)
 }
+
 func (s *Server) cors(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Access-Control-Allow-Origin", "*")
-		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
+		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, OPTIONS")
 		w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
 		if r.Method == http.MethodOptions {
 			w.WriteHeader(http.StatusNoContent)
@@ -70,14 +77,17 @@ func (s *Server) cors(next http.Handler) http.Handler {
 		next.ServeHTTP(w, r)
 	})
 }
+
 func writeJSON(w http.ResponseWriter, code int, v any) {
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
 	w.WriteHeader(code)
 	_ = json.NewEncoder(w).Encode(v)
 }
+
 func writeErr(w http.ResponseWriter, code int, err error) {
 	writeJSON(w, code, map[string]string{"error": err.Error()})
 }
+
 func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
@@ -85,12 +95,16 @@ func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
 	}
 	writeJSON(w, http.StatusOK, s.Mgr.Status())
 }
+
 func (s *Server) handleConfig(w http.ResponseWriter, r *http.Request) {
 	switch r.Method {
 	case http.MethodGet:
 		_ = s.Mgr.ReloadConfig()
 		raw, _ := os.ReadFile(s.Mgr.ConfigPath)
-		writeJSON(w, http.StatusOK, map[string]any{"config": s.Mgr.Cfg, "yaml": string(raw)})
+		writeJSON(w, http.StatusOK, map[string]any{
+			"config": s.Mgr.Cfg,
+			"yaml":   string(raw),
+		})
 	case http.MethodPut:
 		body, err := io.ReadAll(r.Body)
 		if err != nil {
@@ -111,6 +125,7 @@ func (s *Server) handleConfig(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 	}
 }
+
 func (s *Server) handleConfigYAML(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPut {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
@@ -132,8 +147,10 @@ func (s *Server) handleConfigYAML(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, err)
 		return
 	}
+	// also write exact yaml text if user wants formatting preserved — SaveConfig re-marshals
 	writeJSON(w, http.StatusOK, map[string]string{"ok": "saved"})
 }
+
 func (s *Server) handleStart(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
@@ -145,6 +162,7 @@ func (s *Server) handleStart(w http.ResponseWriter, r *http.Request) {
 	}
 	writeJSON(w, http.StatusOK, map[string]string{"ok": "started"})
 }
+
 func (s *Server) handleStop(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
@@ -164,6 +182,7 @@ func (s *Server) handleStop(w http.ResponseWriter, r *http.Request) {
 	}
 	writeJSON(w, http.StatusOK, map[string]string{"ok": "stopped"})
 }
+
 func (s *Server) handleRestart(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
@@ -175,6 +194,7 @@ func (s *Server) handleRestart(w http.ResponseWriter, r *http.Request) {
 	}
 	writeJSON(w, http.StatusOK, map[string]string{"ok": "restarted"})
 }
+
 func (s *Server) handleGenerate(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
@@ -186,6 +206,7 @@ func (s *Server) handleGenerate(w http.ResponseWriter, r *http.Request) {
 	}
 	writeJSON(w, http.StatusOK, map[string]string{"ok": "generated"})
 }
+
 func (s *Server) handleApplyNft(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
@@ -197,6 +218,7 @@ func (s *Server) handleApplyNft(w http.ResponseWriter, r *http.Request) {
 	}
 	writeJSON(w, http.StatusOK, map[string]string{"ok": "applied"})
 }
+
 func (s *Server) handleUpdateResources(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
@@ -208,6 +230,34 @@ func (s *Server) handleUpdateResources(w http.ResponseWriter, r *http.Request) {
 	}
 	writeJSON(w, http.StatusOK, map[string]string{"ok": "updated"})
 }
+
+// Optional basic auth middleware helper for future use.
+func BasicAuth(user, pass string, next http.Handler) http.Handler {
+	if user == "" {
+		return next
+	}
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		u, p, ok := r.BasicAuth()
+		if !ok || u != user || p != pass {
+			w.Header().Set("WWW-Authenticate", `Basic realm="homeproxy"`)
+			http.Error(w, "unauthorized", http.StatusUnauthorized)
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
+}
+
+func ParseListen(addr string) string {
+	addr = strings.TrimSpace(addr)
+	if addr == "" {
+		return ":8080"
+	}
+	if !strings.Contains(addr, ":") {
+		return ":" + addr
+	}
+	return addr
+}
+
 func (s *Server) handleSetMainNode(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
@@ -226,6 +276,7 @@ func (s *Server) handleSetMainNode(w http.ResponseWriter, r *http.Request) {
 	}
 	writeJSON(w, http.StatusOK, map[string]string{"ok": "main_node set"})
 }
+
 func (s *Server) handleDeleteNode(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
@@ -244,6 +295,7 @@ func (s *Server) handleDeleteNode(w http.ResponseWriter, r *http.Request) {
 	}
 	writeJSON(w, http.StatusOK, map[string]string{"ok": "deleted"})
 }
+
 func (s *Server) handleSubscriptions(w http.ResponseWriter, r *http.Request) {
 	switch r.Method {
 	case http.MethodPost:
@@ -274,6 +326,7 @@ func (s *Server) handleSubscriptions(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 	}
 }
+
 func (s *Server) handleSubUpdate(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
@@ -291,28 +344,4 @@ func (s *Server) handleSubUpdate(w http.ResponseWriter, r *http.Request) {
 	}
 	_ = s.Mgr.ReloadConfig()
 	writeJSON(w, http.StatusOK, map[string]any{"ok": "updated", "nodes_added": n})
-}
-func BasicAuth(user, pass string, next http.Handler) http.Handler {
-	if user == "" {
-		return next
-	}
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		u, p, ok := r.BasicAuth()
-		if !ok || u != user || p != pass {
-			w.Header().Set("WWW-Authenticate", `Basic realm="homeproxy"`)
-			http.Error(w, "unauthorized", http.StatusUnauthorized)
-			return
-		}
-		next.ServeHTTP(w, r)
-	})
-}
-func ParseListen(addr string) string {
-	addr = strings.TrimSpace(addr)
-	if addr == "" {
-		return ":8080"
-	}
-	if !strings.Contains(addr, ":") {
-		return ":" + addr
-	}
-	return addr
 }
