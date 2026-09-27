@@ -3,6 +3,7 @@ package main
 import (
 	"flag"
 	"fmt"
+	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -11,7 +12,9 @@ import (
 	"github.com/evecus/homeproxy-go/internal/config"
 	"github.com/evecus/homeproxy-go/internal/generator"
 	"github.com/evecus/homeproxy-go/internal/resources"
+	"github.com/evecus/homeproxy-go/internal/service"
 	"github.com/evecus/homeproxy-go/internal/subscription"
+	"github.com/evecus/homeproxy-go/internal/web"
 )
 
 var version = "0.1.0"
@@ -23,7 +26,6 @@ func main() {
 	}
 	cmd := os.Args[1]
 	args := os.Args[2:]
-
 	switch cmd {
 	case "version", "-v", "--version":
 		fmt.Println("homeproxy-go", version)
@@ -39,6 +41,8 @@ func main() {
 		runSetupRouting(args)
 	case "check":
 		runCheck(args)
+	case "serve":
+		runServe(args)
 	case "help", "-h", "--help":
 		usage()
 	default:
@@ -61,18 +65,42 @@ Commands:
   update-subs       Fetch subscriptions and print merged node names
   setup-routing     Install ip rule/route for TProxy marks
   check             Validate config file
+  serve             Start web UI + API (config / start / stop)
   version           Print version
 
-Global flags (after command):
-  -c, --config path   Config file (default: /etc/homeproxy/config.yaml)
+serve flags:
+  -l, --listen addr   Listen address (default: :8080)
+  --user name         Optional HTTP basic auth user
+  --pass password     Optional HTTP basic auth password
 
 Examples:
-  homeproxy update-resources -c ./configs/config.example.yaml
-  homeproxy generate -c /etc/homeproxy/config.yaml
-  sudo homeproxy apply-nft -c /etc/homeproxy/config.yaml
-  sudo homeproxy setup-routing -c /etc/homeproxy/config.yaml
-  sing-box run -c /var/run/homeproxy/sing-box.json
+  sudo homeproxy serve -c /etc/homeproxy/config.yaml -l :8080
 `, version)
+}
+
+func runServe(args []string) {
+	fs := flag.NewFlagSet("serve", flag.ExitOnError)
+	var path, listen, user, pass string
+	fs.StringVar(&path, "c", "/etc/homeproxy/config.yaml", "config file")
+	fs.StringVar(&path, "config", "/etc/homeproxy/config.yaml", "config file")
+	fs.StringVar(&listen, "l", ":8080", "listen address")
+	fs.StringVar(&listen, "listen", ":8080", "listen address")
+	fs.StringVar(&user, "user", "", "basic auth username")
+	fs.StringVar(&pass, "pass", "", "basic auth password")
+	_ = fs.Parse(args)
+	mgr, err := service.New(path)
+	if err != nil {
+		fatal("load config: %v", err)
+	}
+	srv := web.New(mgr)
+	addr := web.ParseListen(listen)
+	fmt.Printf("homeproxy-go web UI on %s (config: %s)\n", addr, path)
+	if strings.HasPrefix(addr, ":") {
+		fmt.Printf("  open http://127.0.0.1%s\n", addr)
+	}
+	if err := http.ListenAndServe(addr, srv.Wrap(user, pass)); err != nil {
+		fatal("listen: %v", err)
+	}
 }
 
 func configPath(fs *flag.FlagSet, args []string) string {
@@ -136,7 +164,6 @@ func runGenerate(args []string) {
 	fs := flag.NewFlagSet("generate", flag.ExitOnError)
 	path := configPath(fs, args)
 	cfg := loadCfg(path)
-
 	for _, sub := range cfg.Subs {
 		if sub.URL == "" {
 			continue
@@ -148,29 +175,18 @@ func runGenerate(args []string) {
 		}
 		subscription.MergeNodes(cfg, sub.Name, nodes)
 	}
-
 	runDir := cfg.Paths.RunDir
-	if err := os.MkdirAll(runDir, 0o755); err != nil {
-		fatal("mkdir run dir: %v", err)
-	}
-	if err := os.MkdirAll(cfg.Paths.DataDir, 0o755); err != nil {
-		fatal("mkdir data dir: %v", err)
-	}
-
+	_ = os.MkdirAll(runDir, 0o755)
+	_ = os.MkdirAll(cfg.Paths.DataDir, 0o755)
 	m := resources.NewManager(cfg)
 	_ = m.EnsureDir()
 	china4, _ := m.LoadChinaIP4()
 	china6, _ := m.LoadChinaIP6()
-	if cfg.ModeNeedsChinaIP() && len(china4) == 0 {
-		fmt.Fprintln(os.Stderr, "warning: china_ip4.txt empty — run: homeproxy update-resources")
-	}
-
 	sbPath := filepath.Join(runDir, "sing-box.json")
 	if err := generator.NewSingBox(cfg).Write(sbPath); err != nil {
 		fatal("sing-box: %v", err)
 	}
 	fmt.Println("wrote", sbPath)
-
 	nftPath := filepath.Join(runDir, "nftables.nft")
 	if err := generator.NewNftables(cfg, china4, china6).Write(nftPath); err != nil {
 		fatal("nftables: %v", err)
@@ -208,19 +224,10 @@ func runSetupRouting(args []string) {
 	runIP("route", "del", "local", "default", "dev", "lo", "table", "100")
 	mustIP("rule", "add", "fwmark", mark, "lookup", "100")
 	mustIP("route", "add", "local", "default", "dev", "lo", "table", "100")
-	if cfg.Proxy.IPv6 {
-		runIP("-6", "rule", "del", "fwmark", mark, "lookup", "100")
-		runIP("-6", "route", "del", "local", "default", "dev", "lo", "table", "100")
-		mustIP("-6", "rule", "add", "fwmark", mark, "lookup", "100")
-		mustIP("-6", "route", "add", "local", "default", "dev", "lo", "table", "100")
-	}
 	fmt.Printf("policy routing installed for fwmark %s table 100\n", mark)
 }
 
-func runIP(args ...string) {
-	cmd := exec.Command("ip", args...)
-	_ = cmd.Run()
-}
+func runIP(args ...string) { _ = exec.Command("ip", args...).Run() }
 
 func mustIP(args ...string) {
 	cmd := exec.Command("ip", args...)
