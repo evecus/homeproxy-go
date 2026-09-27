@@ -1,103 +1,106 @@
 # homeproxy-go
 
-Transparent proxy controller for **Debian / generic Linux side routers**, inspired by [OpenWrt homeproxy](https://github.com/immortalwrt/homeproxy).
+Debian/Linux 旁路由透明代理控制器，对齐 OpenWrt [homeproxy](https://github.com/immortalwrt/homeproxy) 的分流思路：
 
-It generates **sing-box** + **nftables** rules with the same routing modes:
+- **nftables**：中国大陆 IP 提前 return、LAN/WAN ACL、TProxy 劫持
+- **sing-box**：DNS + 出站 + 域名/规则集路由
+- **YAML 配置 + Web 面板**：路由模式、订阅导入、节点选择、黑白名单、启停
 
-| Mode | Behavior |
-|------|----------|
-| `bypass_mainland_china` | China IP/domains direct, rest via proxy (default) |
-| `proxy_mainland_china` | Only China via proxy |
-| `gfwlist` | Approximate GFW routing via geosite (no DNS nftset yet) |
-| `global` | Everything via proxy |
-| `custom` | Placeholder for user rules |
+## 功能
 
-> DNS module (dnsmasq-style domain → nft set) is **not** included in this version. China IP bypass still works at the firewall layer; domain-level China/GFW handling uses sing-box geosite/geoip.
+| 能力 | 说明 |
+|------|------|
+| 路由模式 | `bypass_mainland_china` / `gfwlist` / `proxy_mainland_china` / `global` / `custom` |
+| 透明代理 | TProxy（推荐）/ Redirect / TUN |
+| 订阅 | 导入 URL、更新并合并节点、设为主节点 |
+| 访问控制 | LAN 过滤模式、IP/MAC 黑白名单、域名强制代理/直连、WAN CIDR |
+| Web UI | 概览启停、客户端、节点、订阅、访问控制、工具 |
+| CI | GitHub Actions 多架构 Release |
 
-## Architecture
+## 依赖
 
-```
-LAN → nftables (China IP return / TProxy mark)
-         ↓
-    sing-box (tproxy inbound + route + outbounds)
-```
+- Linux（Debian 旁路由）
+- [sing-box](https://github.com/SagerNet/sing-box) 可执行文件
+- `nftables`、`iproute2`
+- 内核 TProxy（`CONFIG_NETFILTER_XT_TARGET_TPROXY` 等）
 
-- **China IPv4/IPv6 lists** → nft sets → early `return` (never enter sing-box)
-- **sing-box** handles protocol, DNS hijack port, geosite rules, nodes
-
-## Requirements
-
-- Linux with **nftables**
-- [sing-box](https://github.com/SagerNet/sing-box) installed (`sing-box` in `PATH`)
-- Root for applying nft rules and TProxy policy routing
-
-## Quick start
+## 快速开始
 
 ```bash
-# 1. Install binary (from release or build)
-sudo install -Dm755 homeproxy-linux-amd64 /usr/local/bin/homeproxy
+# 编译
+go build -o bin/homeproxy ./cmd/homeproxy
+# 或 make build
 
-# 2. Config
+# 配置
 sudo mkdir -p /etc/homeproxy /var/lib/homeproxy /var/run/homeproxy
 sudo cp configs/config.example.yaml /etc/homeproxy/config.yaml
-sudo $EDITOR /etc/homeproxy/config.yaml
+# 编辑节点 / 订阅 / LAN 网卡
 
-# 3. Resource lists (China IP, GFW domains)
-sudo homeproxy update-resources -c /etc/homeproxy/config.yaml
+# 校验
+sudo homeproxy check -c /etc/homeproxy/config.yaml
 
-# 4. Generate + apply
+# 生成 sing-box.json + nftables.nft 并启动（CLI）
 sudo homeproxy generate -c /etc/homeproxy/config.yaml
+sudo homeproxy update-resources -c /etc/homeproxy/config.yaml
 sudo homeproxy setup-routing -c /etc/homeproxy/config.yaml
 sudo homeproxy apply-nft -c /etc/homeproxy/config.yaml
+# 或用 systemd：见 deploy/homeproxy.service
 
-# 5. Run sing-box
-sudo sing-box run -c /var/run/homeproxy/sing-box.json
+# Web 面板
+sudo homeproxy serve -c /etc/homeproxy/config.yaml -l :8080
+# 浏览器打开 http://旁路由IP:8080
+# 可选 BasicAuth：-user admin -pass yourpassword
 ```
 
-Or use the systemd unit under `deploy/homeproxy.service`.
+## Web 面板
 
-## CLI
+1. **概览**：启用 / 停用 / 重启  
+2. **客户端**：路由模式、透明代理方式、主节点、DNS、LAN 网卡  
+3. **节点**：列表、设为主节点、删除、手动添加  
+4. **订阅**：导入 URL、更新（可替换同前缀节点）  
+5. **访问控制**：LAN 模式、IP/MAC、域名黑白名单、WAN CIDR  
+6. **工具**：生成配置、应用 nft、更新中国 IP/GFW 列表、YAML 编辑  
 
+保存 ACL 或更换主节点后建议点一次 **重启**。
+
+## 配置摘要
+
+```yaml
+mode: bypass_mainland_china   # 路由模式
+proxy:
+  mode: tproxy
+  main_node: "节点名"         # 或 urltest
+  ipv6: false
+dns:
+  server: 8.8.8.8
+  china_server: 223.5.5.5
+nodes: []
+subscriptions:
+  - name: provider1
+    url: https://...
+    enabled: true
+control:
+  lan_interfaces: [eth1]
+  lan_proxy_mode: all          # all | except_listed | listed_only
+  lan_direct_ipv4: []
+  lan_proxy_ipv4: []
+  proxy_domains: []
+  direct_domains: []
+paths:
+  data_dir: /var/lib/homeproxy
+  run_dir: /var/run/homeproxy
+  singbox_bin: sing-box
 ```
-homeproxy generate          # write sing-box.json + nftables.nft
-homeproxy apply-nft         # nft -f the generated file
-homeproxy update-resources  # download china_ip / gfw list
-homeproxy update-subs       # fetch subscriptions (print nodes)
-homeproxy setup-routing     # ip rule/route for TProxy fwmark
-homeproxy check             # validate YAML
-```
 
-## Build
+完整示例见 `configs/config.example.yaml`。
 
-```bash
-git clone https://github.com/evecus/homeproxy-go.git
-cd homeproxy-go
-make build
-# → bin/homeproxy
-```
+## 旁路由注意
 
-GitHub Actions builds multi-arch binaries on push/tag (`linux/amd64`, `arm64`, `armv7`, `386`).
-
-## Side-router notes
-
-1. Point LAN clients’ **gateway** (and ideally DNS) to this machine.
-2. Enable IP forwarding: `sysctl -w net.ipv4.ip_forward=1`
-3. Set `control.lan_interfaces` to your LAN NIC (e.g. `eth1`).
-4. TProxy needs the policy routing installed by `setup-routing`.
-
-## Config sketch
-
-See [`configs/config.example.yaml`](configs/config.example.yaml).
-
-Supported node types (share links / YAML): Shadowsocks, VMess, VLESS, Trojan, Hysteria2 (basic fields; extra sing-box keys via `extra` / `transport`).
-
-## Roadmap
-
-- [ ] Optional DNS module (domain → nft set)
-- [ ] Full custom routing rules in YAML
-- [ ] URLTest / selector UI helpers
-- [ ] Auto subscription refresh daemon
+- 主路由网关指向本机，或本机做网关  
+- `control.lan_interfaces` 填接内网的网卡  
+- TProxy 需要 `setup-routing` 安装 fwmark 策略路由  
+- 停用时可用面板「停用」并勾选清理 nft  
 
 ## License
 
-GPL-2.0-only (same spirit as homeproxy / ImmortalWrt packages).
+GPL-3.0（与 immortalwrt/homeproxy 思路对齐的独立实现）
