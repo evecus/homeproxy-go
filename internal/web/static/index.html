@@ -5,92 +5,284 @@
 <meta name="viewport" content="width=device-width,initial-scale=1"/>
 <title>homeproxy-go</title>
 <style>
-body{margin:0;font-family:system-ui,sans-serif;background:#0f1419;color:#e7ecf3}
-header{padding:1rem 1.25rem;border-bottom:1px solid #2d3a4f;display:flex;justify-content:space-between;align-items:center}
-.badge{padding:.25rem .6rem;border-radius:999px;font-size:.8rem;background:#450a0a;color:#fca5a5}
+:root{--bg:#0f1419;--card:#1a2332;--bd:#2d3a4f;--tx:#e7ecf3;--mu:#8b9bb4;--ac:#3b82f6;--ok:#22c55e;--er:#ef4444}
+*{box-sizing:border-box}body{margin:0;font-family:system-ui,sans-serif;background:var(--bg);color:var(--tx);font-size:14px}
+header{display:flex;justify-content:space-between;align-items:center;padding:.85rem 1.1rem;border-bottom:1px solid var(--bd);background:#121a24;position:sticky;top:0;z-index:5}
+h1{margin:0;font-size:1.05rem}.badge{padding:.2rem .55rem;border-radius:999px;font-size:.75rem;background:#450a0a;color:#fca5a5}
 .badge.on{background:#14532d;color:#86efac}
-main{max-width:900px;margin:0 auto;padding:1rem}
-.card{background:#1a2332;border:1px solid #2d3a4f;border-radius:12px;padding:1rem;margin-bottom:1rem}
-label{display:block;color:#8b9bb4;font-size:.85rem;margin:.4rem 0 .2rem}
-input,select,textarea{width:100%;padding:.5rem;border-radius:8px;border:1px solid #2d3a4f;background:#0d1219;color:#e7ecf3;margin-bottom:.5rem;box-sizing:border-box}
-textarea{min-height:120px;font-family:monospace}
-button{border:0;border-radius:8px;padding:.5rem 1rem;background:#3b82f6;color:#fff;cursor:pointer;margin:.2rem}
-button.sec{background:#334155}button.ok{background:#22c55e;color:#052e16}button.er{background:#ef4444}
-.msg{color:#8b9bb4;font-size:.85rem}.msg.e{color:#fca5a5}.msg.o{color:#86efac}
-table{width:100%;border-collapse:collapse}td,th{border-bottom:1px solid #2d3a4f;padding:.4rem;text-align:left}
-.tabs button{background:transparent;border:1px solid #2d3a4f;color:#8b9bb4}.tabs button.active{background:#3b82f6;color:#fff;border-color:#3b82f6}
+main{max-width:980px;margin:0 auto;padding:.85rem}
+.tabs{display:flex;gap:.3rem;margin-bottom:.85rem;flex-wrap:wrap}
+.tabs button{background:transparent;color:var(--mu);border:1px solid var(--bd);border-radius:8px;padding:.4rem .75rem;cursor:pointer;font-size:.85rem}
+.tabs button.active{background:var(--ac);color:#fff;border-color:var(--ac)}
 .panel{display:none}.panel.active{display:block}
+.card{background:var(--card);border:1px solid var(--bd);border-radius:10px;padding:.9rem 1rem;margin-bottom:.85rem}
+.card h2{margin:0 0 .65rem;font-size:.75rem;color:var(--mu);text-transform:uppercase;letter-spacing:.04em}
+label{display:block;font-size:.8rem;color:var(--mu);margin:.35rem 0 .2rem}
+input,select,textarea{width:100%;padding:.45rem .55rem;border-radius:7px;border:1px solid var(--bd);background:#0d1219;color:var(--tx);margin-bottom:.4rem}
+textarea{min-height:90px;font-family:ui-monospace,monospace;font-size:.8rem}
+.row{display:flex;flex-wrap:wrap;gap:.4rem;margin-top:.4rem}
+.grid2{display:grid;gap:.75rem}@media(min-width:720px){.grid2{grid-template-columns:1fr 1fr}}
+button{border:0;border-radius:7px;padding:.45rem .85rem;cursor:pointer;background:var(--ac);color:#fff;font-size:.85rem}
+button.sec{background:#334155}button.ok{background:var(--ok);color:#052e16}button.er{background:var(--er)}button.sm{padding:.3rem .55rem;font-size:.75rem}
+.msg{font-size:.8rem;color:var(--mu);min-height:1.1em;margin-top:.4rem}.msg.e{color:#fca5a5}.msg.o{color:#86efac}
+table{width:100%;border-collapse:collapse;font-size:.85rem}th,td{text-align:left;padding:.35rem;border-bottom:1px solid var(--bd);vertical-align:middle}th{color:var(--mu);font-weight:500}
+.stat{font-size:1.25rem;font-weight:600}.hint{font-size:.75rem;color:var(--mu)}
+.tag{display:inline-block;padding:.1rem .4rem;border-radius:4px;background:#243044;font-size:.7rem;color:#93c5fd}
 </style>
 </head>
 <body>
-<header><h1 style="margin:0;font-size:1.1rem">homeproxy-go</h1><span id="badge" class="badge">● 已停止</span></header>
+<header>
+<h1>homeproxy-go</h1>
+<span id="badge" class="badge">● 已停止</span>
+</header>
 <main>
 <div class="tabs">
 <button type="button" class="active" data-t="ov">概览</button>
-<button type="button" data-t="cf">配置</button>
-<button type="button" data-t="nd">节点</button>
-<button type="button" data-t="tl">工具</button>
+<button type="button" data-t="client">客户端</button>
+<button type="button" data-t="nodes">节点</button>
+<button type="button" data-t="subs">订阅</button>
+<button type="button" data-t="acl">访问控制</button>
+<button type="button" data-t="tools">工具</button>
 </div>
+
 <div id="ov" class="panel active">
-<div class="card"><h3>服务状态</h3><p id="rs" style="font-size:1.3rem;font-weight:600">—</p>
+<div class="grid2">
+<div class="card"><h2>服务</h2><div class="stat" id="rs">—</div>
+<div class="row">
 <button type="button" class="ok" id="bStart">启用</button>
 <button type="button" class="er" id="bStop">停用</button>
 <button type="button" class="sec" id="bRestart">重启</button>
 <button type="button" class="sec" id="bRef">刷新</button>
-<div class="msg" id="om"></div></div>
-<div class="card"><p>路由 <b id="sm">—</b> · 代理 <b id="sp">—</b> · 节点 <b id="sn">—</b></p><p id="spath" style="color:#8b9bb4;font-size:.8rem"></p></div>
-</div>
-<div id="cf" class="panel">
-<div class="card">
+</div><div class="msg" id="om"></div></div>
+<div class="card"><h2>当前</h2>
+<p>路由模式 <b id="sm">—</b></p>
+<p>透明代理 <b id="sp">—</b></p>
+<p>主节点 <b id="sn">—</b></p>
+<p class="hint" id="spath"></p></div>
+</div></div>
+
+<div id="client" class="panel">
+<div class="card"><h2>路由与代理（同 homeproxy 客户端）</h2>
+<div class="grid2">
+<div>
 <label>路由模式</label>
-<select id="mode"><option value="bypass_mainland_china">绕过中国大陆</option><option value="gfwlist">GFWList</option><option value="proxy_mainland_china">仅代理大陆</option><option value="global">全局</option><option value="custom">自定义</option></select>
-<label>透明代理</label>
+<select id="mode">
+<option value="bypass_mainland_china">绕过中国大陆</option>
+<option value="gfwlist">GFWList</option>
+<option value="proxy_mainland_china">仅代理中国大陆</option>
+<option value="global">全局代理</option>
+<option value="custom">自定义</option>
+</select>
+<label>透明代理方式</label>
 <select id="pmode"><option value="tproxy">TProxy</option><option value="redirect">Redirect</option><option value="tun">TUN</option></select>
-<label>主节点</label><input id="mnode"/>
-<label>LAN 网卡</label><input id="lif" placeholder="eth1"/>
-<label>远程 DNS</label><input id="dns"/><label>国内 DNS</label><input id="cdns"/>
-<label>日志</label><select id="log"><option>warn</option><option>info</option><option>debug</option></select>
-<button type="button" id="bSave">保存</button><button type="button" class="sec" id="bLoad">重载</button>
-<div class="msg" id="cm"></div></div></div>
-<div id="nd" class="panel">
-<div class="card"><table><thead><tr><th>名称</th><th>类型</th><th>服务器</th><th>端口</th></tr></thead><tbody id="nt"></tbody></table>
-<label>名称</label><input id="nn"/><label>类型</label>
+<label>主节点</label>
+<select id="mnode"><option value="">—</option></select>
+<label>IPv6</label>
+<select id="ipv6"><option value="0">关闭</option><option value="1">开启</option></select>
+</div>
+<div>
+<label>远程 DNS（经代理）</label><input id="dns" placeholder="8.8.8.8"/>
+<label>国内 DNS</label><input id="cdns" placeholder="223.5.5.5"/>
+<label>LAN 监听网卡（逗号分隔）</label><input id="lif" placeholder="eth1"/>
+<label>日志级别</label>
+<select id="log"><option>warn</option><option>info</option><option>debug</option><option>error</option></select>
+</div>
+</div>
+<div class="row"><button type="button" id="bSaveClient">保存客户端设置</button></div>
+<div class="msg" id="cm"></div>
+</div></div>
+
+<div id="nodes" class="panel">
+<div class="card"><h2>节点列表 · 选择主节点</h2>
+<div style="overflow-x:auto">
+<table><thead><tr><th>名称</th><th>类型</th><th>服务器</th><th>端口</th><th>操作</th></tr></thead>
+<tbody id="nt"></tbody></table>
+</div>
+<div class="msg" id="nmmsg"></div>
+</div>
+<div class="card"><h2>手动添加节点</h2>
+<div class="grid2">
+<div>
+<label>名称</label><input id="nn"/>
+<label>类型</label>
 <select id="ntype"><option>shadowsocks</option><option>vmess</option><option>vless</option><option>trojan</option><option>hysteria2</option></select>
-<label>服务器</label><input id="ns"/><label>端口</label><input id="np" type="number"/>
-<label>密码/UUID</label><input id="nsec"/><label>SS 加密</label><input id="nm" placeholder="aes-128-gcm"/>
+<label>服务器</label><input id="ns"/>
+<label>端口</label><input id="np" type="number"/>
+</div>
+<div>
+<label>密码 / UUID</label><input id="nsec"/>
+<label>SS 加密</label><input id="nm" placeholder="aes-128-gcm"/>
 <label>TLS SNI</label><input id="nsni"/>
-<button type="button" id="bAdd">添加并保存</button><div class="msg" id="nmmsg"></div></div></div>
-<div id="tl" class="panel">
-<div class="card">
+</div>
+</div>
+<button type="button" id="bAdd">添加并保存</button>
+</div></div>
+
+<div id="subs" class="panel">
+<div class="card"><h2>订阅</h2>
+<table><thead><tr><th>名称</th><th>URL</th><th>操作</th></tr></thead><tbody id="st"></tbody></table>
+<div class="msg" id="submsg"></div>
+</div>
+<div class="card"><h2>导入订阅</h2>
+<label>名称</label><input id="subName" placeholder="provider1"/>
+<label>订阅 URL</label><input id="subURL" placeholder="https://..."/>
+<div class="row">
+<button type="button" id="bAddSub">添加订阅</button>
+<button type="button" class="sec" id="bUpAll">更新全部订阅（替换同名节点）</button>
+</div>
+</div></div>
+
+<div id="acl" class="panel">
+<div class="card"><h2>访问控制 / 黑白名单</h2>
+<label>LAN 代理过滤模式</label>
+<select id="lpm">
+<option value="all">全部设备走路由模式</option>
+<option value="except_listed">列表内直连，其余代理</option>
+<option value="listed_only">仅列表内代理，其余直连</option>
+</select>
+<div class="grid2">
+<div>
+<label>LAN 直连 IPv4（每行一个）</label>
+<textarea id="lanD4" placeholder="192.168.1.50"></textarea>
+<label>LAN 直连 MAC</label>
+<textarea id="lanDM" placeholder="aa:bb:cc:dd:ee:ff"></textarea>
+<label>LAN 代理 IPv4（listed_only 时）</label>
+<textarea id="lanP4"></textarea>
+<label>LAN 代理 MAC</label>
+<textarea id="lanPM"></textarea>
+</div>
+<div>
+<label>强制代理域名（每行一个）</label>
+<textarea id="domP" placeholder="google.com"></textarea>
+<label>强制直连域名</label>
+<textarea id="domD"></textarea>
+<label>WAN 直连目标 CIDR</label>
+<textarea id="wanD4" placeholder="1.1.1.1/32"></textarea>
+<label>WAN 强制代理目标 CIDR</label>
+<textarea id="wanP4"></textarea>
+</div>
+</div>
+<button type="button" id="bSaveACL">保存访问控制</button>
+<div class="msg" id="am"></div>
+</div></div>
+
+<div id="tools" class="panel">
+<div class="card"><h2>运维</h2>
+<div class="row">
 <button type="button" class="sec" id="bGen">生成配置</button>
 <button type="button" class="sec" id="bNft">应用 nft</button>
-<button type="button" class="sec" id="bRes">更新资源列表</button>
+<button type="button" class="sec" id="bRes">更新中国 IP / GFW 列表</button>
+</div>
 <div class="msg" id="tm"></div>
-<label>YAML</label><textarea id="yaml"></textarea>
-<button type="button" id="bSY">保存 YAML</button><button type="button" class="sec" id="bLY">加载</button>
-<div class="msg" id="ym"></div></div></div>
+<h2 style="margin-top:1rem">原始 YAML</h2>
+<textarea id="yaml" style="min-height:180px"></textarea>
+<div class="row"><button type="button" id="bSY">保存 YAML</button><button type="button" class="sec" id="bLY">加载</button></div>
+<div class="msg" id="ym"></div>
+</div></div>
 </main>
 <script>
-let cfg=null;const $=id=>document.getElementById(id);
+let cfg=null;
+const $=id=>document.getElementById(id);
 const msg=(el,t,ok)=>{el.textContent=t||'';el.className='msg'+(t?(ok?' o':' e'):'')};
+const lines=s=>(s||'').split(/[\n,]+/).map(x=>x.trim()).filter(Boolean);
+const join=a=>(a||[]).join('\n');
 async function api(p,o={}){const r=await fetch('/api'+p,{headers:{'Content-Type':'application/json'},...o});const d=await r.json().catch(()=>({}));if(!r.ok)throw new Error(d.error||r.statusText);return d}
 document.querySelectorAll('.tabs button').forEach(b=>b.onclick=()=>{document.querySelectorAll('.tabs button').forEach(x=>x.classList.remove('active'));document.querySelectorAll('.panel').forEach(x=>x.classList.remove('active'));b.classList.add('active');$(b.dataset.t).classList.add('active')});
+
 async function refresh(){try{const s=await api('/status');const b=$('badge');if(s.running){b.textContent='● 运行中 PID '+s.pid;b.className='badge on';$('rs').textContent='运行中'}else{b.textContent='● 已停止';b.className='badge';$('rs').textContent='已停止'}$('sm').textContent=s.mode||'—';$('sp').textContent=s.proxy_mode||'—';$('sn').textContent=s.main_node||'—';$('spath').textContent=s.config_path||''}catch(e){msg($('om'),e.message,0)}}
-function fill(c){cfg=c;$('mode').value=c.mode||'bypass_mainland_china';$('pmode').value=(c.proxy&&c.proxy.mode)||'tproxy';$('mnode').value=(c.proxy&&c.proxy.main_node)||'';$('lif').value=((c.control&&c.control.lan_interfaces)||[]).join(',');$('dns').value=(c.dns&&c.dns.server)||'';$('cdns').value=(c.dns&&c.dns.china_server)||'';$('log').value=(c.log&&c.log.level)||'warn';const tb=$('nt');tb.innerHTML='';(c.nodes||[]).forEach(n=>{const tr=document.createElement('tr');tr.innerHTML=`<td>${n.name||''}</td><td>${n.type||''}</td><td>${n.server||''}</td><td>${n.port||''}</td>`;tb.appendChild(tr)})}
-function formCfg(){const c=JSON.parse(JSON.stringify(cfg||{}));c.mode=$('mode').value;c.proxy=c.proxy||{};c.proxy.mode=$('pmode').value;c.proxy.main_node=$('mnode').value.trim();c.control=c.control||{};c.control.lan_interfaces=$('lif').value.split(',').map(s=>s.trim()).filter(Boolean);c.dns=c.dns||{};c.dns.server=$('dns').value.trim();c.dns.china_server=$('cdns').value.trim();c.log=c.log||{};c.log.level=$('log').value;return c}
+
+function fillNodesSelect(nodes,main){
+  const sel=$('mnode');sel.innerHTML='';
+  const o0=document.createElement('option');o0.value='';o0.textContent='—';sel.appendChild(o0);
+  const ou=document.createElement('option');ou.value='urltest';ou.textContent='urltest（自动测速）';sel.appendChild(ou);
+  (nodes||[]).forEach(n=>{const o=document.createElement('option');o.value=n.name;o.textContent=n.name+' ('+n.type+')';sel.appendChild(o)});
+  if(main)sel.value=main;
+}
+
+function fill(c){
+  cfg=c;
+  $('mode').value=c.mode||'bypass_mainland_china';
+  $('pmode').value=(c.proxy&&c.proxy.mode)||'tproxy';
+  fillNodesSelect(c.nodes,(c.proxy&&c.proxy.main_node)||'');
+  $('ipv6').value=(c.proxy&&c.proxy.ipv6)?'1':'0';
+  $('dns').value=(c.dns&&c.dns.server)||'';
+  $('cdns').value=(c.dns&&c.dns.china_server)||'';
+  $('lif').value=((c.control&&c.control.lan_interfaces)||[]).join(',');
+  $('log').value=(c.log&&c.log.level)||'warn';
+  const tb=$('nt');tb.innerHTML='';
+  (c.nodes||[]).forEach(n=>{
+    const tr=document.createElement('tr');
+    const isMain=(c.proxy&&c.proxy.main_node)===n.name;
+    tr.innerHTML=`<td>${n.name||''}${isMain?' <span class="tag">主</span>':''}</td><td>${n.type||''}</td><td>${n.server||''}</td><td>${n.port||''}</td><td></td>`;
+    const td=tr.lastChild;
+    const b1=document.createElement('button');b1.type='button';b1.className='sm ok';b1.textContent='设为主节点';
+    b1.onclick=async()=>{try{await api('/nodes/main',{method:'POST',body:JSON.stringify({name:n.name})});msg($('nmmsg'),'已设为主节点: '+n.name,1);await loadCfg();await refresh()}catch(e){msg($('nmmsg'),e.message,0)}};
+    const b2=document.createElement('button');b2.type='button';b2.className='sm er';b2.textContent='删除';
+    b2.onclick=async()=>{if(!confirm('删除节点 '+n.name+'?'))return;try{await api('/nodes/delete',{method:'POST',body:JSON.stringify({name:n.name})});msg($('nmmsg'),'已删除',1);await loadCfg()}catch(e){msg($('nmmsg'),e.message,0)}};
+    td.appendChild(b1);td.appendChild(b2);tb.appendChild(tr);
+  });
+  const st=$('st');st.innerHTML='';
+  (c.subscriptions||[]).forEach(s=>{
+    const tr=document.createElement('tr');
+    tr.innerHTML=`<td>${s.name||''}</td><td style="max-width:280px;overflow:hidden;text-overflow:ellipsis">${s.url||''}</td><td></td>`;
+    const td=tr.lastChild;
+    const u=document.createElement('button');u.type='button';u.className='sm sec';u.textContent='更新';
+    u.onclick=async()=>{try{msg($('submsg'),'更新中…',1);const r=await api('/subscriptions/update',{method:'POST',body:JSON.stringify({name:s.name,replace:true})});msg($('submsg'),'完成，新增/合并节点 '+r.nodes_added,1);await loadCfg()}catch(e){msg($('submsg'),e.message,0)}};
+    const d=document.createElement('button');d.type='button';d.className='sm er';d.textContent='删除';
+    d.onclick=async()=>{try{await api('/subscriptions',{method:'DELETE',body:JSON.stringify({name:s.name})});msg($('submsg'),'已删除订阅',1);await loadCfg()}catch(e){msg($('submsg'),e.message,0)}};
+    td.appendChild(u);td.appendChild(d);st.appendChild(tr);
+  });
+  const ctl=c.control||{};
+  $('lpm').value=ctl.lan_proxy_mode||'all';
+  $('lanD4').value=join(ctl.lan_direct_ipv4);
+  $('lanDM').value=join(ctl.lan_direct_mac);
+  $('lanP4').value=join(ctl.lan_proxy_ipv4);
+  $('lanPM').value=join(ctl.lan_proxy_mac);
+  $('domP').value=join(ctl.proxy_domains);
+  $('domD').value=join(ctl.direct_domains);
+  $('wanD4').value=join(ctl.wan_direct_ipv4);
+  $('wanP4').value=join(ctl.wan_proxy_ipv4);
+}
+
 async function loadCfg(){const d=await api('/config');fill(d.config);if(d.yaml)$('yaml').value=d.yaml}
+
+function baseClient(){
+  const c=JSON.parse(JSON.stringify(cfg||{}));
+  c.mode=$('mode').value;
+  c.proxy=c.proxy||{};
+  c.proxy.mode=$('pmode').value;
+  c.proxy.main_node=$('mnode').value;
+  c.proxy.ipv6=$('ipv6').value==='1';
+  c.dns=c.dns||{};
+  c.dns.server=$('dns').value.trim();
+  c.dns.china_server=$('cdns').value.trim();
+  c.control=c.control||{};
+  c.control.lan_interfaces=$('lif').value.split(',').map(s=>s.trim()).filter(Boolean);
+  c.log=c.log||{};
+  c.log.level=$('log').value;
+  return c;
+}
+
 $('bRef').onclick=refresh;
 $('bStart').onclick=async()=>{try{msg($('om'),'启动中…',1);await api('/start',{method:'POST'});msg($('om'),'已启用',1);await refresh()}catch(e){msg($('om'),e.message,0)}};
 $('bStop').onclick=async()=>{try{await api('/stop',{method:'POST',body:JSON.stringify({flush_nft:true})});msg($('om'),'已停用',1);await refresh()}catch(e){msg($('om'),e.message,0)}};
-$('bRestart').onclick=async()=>{try{await api('/restart',{method:'POST'});msg($('om'),'已重启',1);await refresh()}catch(e){msg($('om'),e.message,0)}};
-$('bSave').onclick=async()=>{try{await api('/config',{method:'PUT',body:JSON.stringify(formCfg())});msg($('cm'),'已保存',1);await loadCfg()}catch(e){msg($('cm'),e.message,0)}};
-$('bLoad').onclick=async()=>{try{await loadCfg();msg($('cm'),'已加载',1)}catch(e){msg($('cm'),e.message,0)}};
-$('bAdd').onclick=async()=>{try{const c=formCfg();c.nodes=c.nodes||[];const t=$('ntype').value;const n={name:$('nn').value.trim(),type:t,server:$('ns').value.trim(),port:+$('np').value||0};if(!n.name||!n.server)throw new Error('必填');const s=$('nsec').value.trim();if(t==='shadowsocks'){n.password=s;n.method=$('nm').value.trim()||'aes-128-gcm'}else if(t==='vmess'||t==='vless')n.uuid=s;else n.password=s;const sni=$('nsni').value.trim();if(sni)n.tls={enabled:true,server_name:sni};c.nodes.push(n);if(!c.proxy.main_node)c.proxy.main_node=n.name;await api('/config',{method:'PUT',body:JSON.stringify(c)});msg($('nmmsg'),'已添加',1);await loadCfg()}catch(e){msg($('nmmsg'),e.message,0)}};
+$('bRestart').onclick=async()=>{try{msg($('om'),'重启中…',1);await api('/restart',{method:'POST'});msg($('om'),'已重启',1);await refresh()}catch(e){msg($('om'),e.message,0)}};
+
+$('bSaveClient').onclick=async()=>{try{await api('/config',{method:'PUT',body:JSON.stringify(baseClient())});msg($('cm'),'已保存',1);await loadCfg();await refresh()}catch(e){msg($('cm'),e.message,0)}};
+
+$('bAdd').onclick=async()=>{try{const c=baseClient();c.nodes=c.nodes||[];const t=$('ntype').value;const n={name:$('nn').value.trim(),type:t,server:$('ns').value.trim(),port:+$('np').value||0};if(!n.name||!n.server)throw new Error('名称和服务器必填');const s=$('nsec').value.trim();if(t==='shadowsocks'){n.password=s;n.method=$('nm').value.trim()||'aes-128-gcm'}else if(t==='vmess'||t==='vless')n.uuid=s;else n.password=s;const sni=$('nsni').value.trim();if(sni)n.tls={enabled:true,server_name:sni};c.nodes.push(n);if(!c.proxy.main_node)c.proxy.main_node=n.name;await api('/config',{method:'PUT',body:JSON.stringify(c)});msg($('nmmsg'),'已添加',1);await loadCfg()}catch(e){msg($('nmmsg'),e.message,0)}};
+
+$('bAddSub').onclick=async()=>{try{await api('/subscriptions',{method:'POST',body:JSON.stringify({name:$('subName').value.trim(),url:$('subURL').value.trim(),enabled:true})});msg($('submsg'),'订阅已添加，请点「更新」拉取节点',1);$('subName').value='';$('subURL').value='';await loadCfg()}catch(e){msg($('submsg'),e.message,0)}};
+$('bUpAll').onclick=async()=>{try{msg($('submsg'),'更新全部…',1);const r=await api('/subscriptions/update',{method:'POST',body:JSON.stringify({name:'',replace:true})});msg($('submsg'),'完成，节点变化 '+r.nodes_added,1);await loadCfg()}catch(e){msg($('submsg'),e.message,0)}};
+
+$('bSaveACL').onclick=async()=>{try{const c=baseClient();c.control=c.control||{};c.control.lan_proxy_mode=$('lpm').value;c.control.lan_direct_ipv4=lines($('lanD4').value);c.control.lan_direct_mac=lines($('lanDM').value);c.control.lan_proxy_ipv4=lines($('lanP4').value);c.control.lan_proxy_mac=lines($('lanPM').value);c.control.proxy_domains=lines($('domP').value);c.control.direct_domains=lines($('domD').value);c.control.wan_direct_ipv4=lines($('wanD4').value);c.control.wan_proxy_ipv4=lines($('wanP4').value);await api('/config',{method:'PUT',body:JSON.stringify(c)});msg($('am'),'访问控制已保存（重启代理后生效）',1);await loadCfg()}catch(e){msg($('am'),e.message,0)}};
+
 $('bGen').onclick=async()=>{try{await api('/generate',{method:'POST'});msg($('tm'),'已生成',1)}catch(e){msg($('tm'),e.message,0)}};
 $('bNft').onclick=async()=>{try{await api('/apply-nft',{method:'POST'});msg($('tm'),'nft 已应用',1)}catch(e){msg($('tm'),e.message,0)}};
-$('bRes').onclick=async()=>{try{await api('/update-resources',{method:'POST'});msg($('tm'),'已更新',1)}catch(e){msg($('tm'),e.message,0)}};
+$('bRes').onclick=async()=>{try{msg($('tm'),'下载中…',1);await api('/update-resources',{method:'POST'});msg($('tm'),'已更新',1)}catch(e){msg($('tm'),e.message,0)}};
 $('bLY').onclick=async()=>{try{const d=await api('/config');$('yaml').value=d.yaml||'';msg($('ym'),'已加载',1)}catch(e){msg($('ym'),e.message,0)}};
 $('bSY').onclick=async()=>{try{await api('/config/yaml',{method:'PUT',body:JSON.stringify({yaml:$('yaml').value})});msg($('ym'),'已保存',1);await loadCfg()}catch(e){msg($('ym'),e.message,0)}};
+
 (async()=>{await refresh();try{await loadCfg()}catch(e){msg($('cm'),e.message,0)}setInterval(refresh,5000)})();
 </script>
 </body>
