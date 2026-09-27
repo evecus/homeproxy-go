@@ -64,21 +64,43 @@ type Status struct {
 	Mode        string `json:"mode"`
 	ProxyMode   string `json:"proxy_mode"`
 	MainNode    string `json:"main_node"`
+	MainUDP     string `json:"main_udp_node"`
+	Nodes       int    `json:"nodes"`
+	Subs        int    `json:"subscriptions"`
+	Rules       int    `json:"rules"`
 	SingBoxJSON string `json:"singbox_json"`
 	NftPath     string `json:"nft_path"`
+	ChinaIP4    bool   `json:"china_ip4_ready"`
+	ChinaIP6    bool   `json:"china_ip6_ready"`
+	GFWList     bool   `json:"gfw_list_ready"`
 	Version     string `json:"version,omitempty"`
 }
 
 func (m *Manager) Status() Status {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	rm := resources.NewManager(m.Cfg)
 	st := Status{
 		ConfigPath:  m.ConfigPath,
 		Mode:        m.Cfg.Mode,
 		ProxyMode:   m.Cfg.Proxy.Mode,
 		MainNode:    m.Cfg.Proxy.MainNode,
+		MainUDP:     m.Cfg.Proxy.MainUDP,
+		Nodes:       len(m.Cfg.Nodes),
+		Subs:        len(m.Cfg.Subs),
+		Rules:       len(m.Cfg.Rules),
 		SingBoxJSON: filepath.Join(m.Cfg.Paths.RunDir, "sing-box.json"),
 		NftPath:     filepath.Join(m.Cfg.Paths.RunDir, "nftables.nft"),
+		Version:     "0.1.0",
+	}
+	if _, err := os.Stat(rm.Path(resources.FileChinaIP4)); err == nil {
+		st.ChinaIP4 = true
+	}
+	if _, err := os.Stat(rm.Path(resources.FileChinaIP6)); err == nil {
+		st.ChinaIP6 = true
+	}
+	if _, err := os.Stat(rm.Path(resources.FileGFWList)); err == nil {
+		st.GFWList = true
 	}
 	pid := m.readPID()
 	if pid > 0 && processAlive(pid) {
@@ -96,7 +118,6 @@ func (m *Manager) Status() Status {
 func (m *Manager) pidFile() string {
 	return filepath.Join(m.Cfg.Paths.RunDir, "sing-box.pid")
 }
-
 func (m *Manager) readPID() int {
 	b, err := os.ReadFile(m.pidFile())
 	if err != nil {
@@ -105,12 +126,10 @@ func (m *Manager) readPID() int {
 	n, _ := strconv.Atoi(strings.TrimSpace(string(b)))
 	return n
 }
-
 func (m *Manager) writePID(pid int) error {
 	_ = os.MkdirAll(m.Cfg.Paths.RunDir, 0o755)
 	return os.WriteFile(m.pidFile(), []byte(strconv.Itoa(pid)+"\n"), 0o644)
 }
-
 func processAlive(pid int) bool {
 	if pid <= 0 {
 		return false
@@ -188,16 +207,7 @@ func (m *Manager) SetupRouting() error {
 	if err := mustIP("rule", "add", "fwmark", mark, "lookup", "100"); err != nil {
 		return err
 	}
-	if err := mustIP("route", "add", "local", "default", "dev", "lo", "table", "100"); err != nil {
-		return err
-	}
-	if cfg.Proxy.IPv6 {
-		runIP("-6", "rule", "del", "fwmark", mark, "lookup", "100")
-		runIP("-6", "route", "del", "local", "default", "dev", "lo", "table", "100")
-		_ = mustIP("-6", "rule", "add", "fwmark", mark, "lookup", "100")
-		_ = mustIP("-6", "route", "add", "local", "default", "dev", "lo", "table", "100")
-	}
-	return nil
+	return mustIP("route", "add", "local", "default", "dev", "lo", "table", "100")
 }
 
 func (m *Manager) UpdateResources() error {
@@ -227,8 +237,7 @@ func (m *Manager) Start() error {
 		_ = mustIP("route", "add", "local", "default", "dev", "lo", "table", "100")
 	}
 	sbPath := filepath.Join(m.Cfg.Paths.RunDir, "sing-box.json")
-	bin := m.Cfg.Paths.SingBoxBin
-	cmd := exec.Command(bin, "run", "-c", sbPath)
+	cmd := exec.Command(m.Cfg.Paths.SingBoxBin, "run", "-c", sbPath)
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
@@ -237,10 +246,7 @@ func (m *Manager) Start() error {
 	}
 	m.cmd = cmd
 	_ = m.writePID(cmd.Process.Pid)
-	go func() {
-		_ = cmd.Wait()
-		_ = os.Remove(m.pidFile())
-	}()
+	go func() { _ = cmd.Wait(); _ = os.Remove(m.pidFile()) }()
 	time.Sleep(200 * time.Millisecond)
 	if !processAlive(cmd.Process.Pid) {
 		return fmt.Errorf("sing-box exited immediately")
@@ -251,7 +257,6 @@ func (m *Manager) Start() error {
 func (m *Manager) Stop(flushNft bool) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	var errs []string
 	pid := m.readPID()
 	if pid <= 0 && m.cmd != nil && m.cmd.Process != nil {
 		pid = m.cmd.Process.Pid
@@ -267,14 +272,7 @@ func (m *Manager) Stop(flushNft bool) error {
 	_ = os.Remove(m.pidFile())
 	m.cmd = nil
 	if flushNft {
-		if out, err := exec.Command("nft", "delete", "table", "inet", "homeproxy").CombinedOutput(); err != nil {
-			if !strings.Contains(string(out), "No such file") && !strings.Contains(string(out), "does not exist") {
-				errs = append(errs, string(out))
-			}
-		}
-	}
-	if len(errs) > 0 {
-		return fmt.Errorf("%s", strings.Join(errs, "; "))
+		_ = exec.Command("nft", "delete", "table", "inet", "homeproxy").Run()
 	}
 	return nil
 }
@@ -285,10 +283,7 @@ func (m *Manager) Restart() error {
 	return m.Start()
 }
 
-func runIP(args ...string) {
-	_ = exec.Command("ip", args...).Run()
-}
-
+func runIP(args ...string) { _ = exec.Command("ip", args...).Run() }
 func mustIP(args ...string) error {
 	out, err := exec.Command("ip", args...).CombinedOutput()
 	if err != nil {
@@ -334,9 +329,7 @@ func (m *Manager) AddSubscription(sub config.Subscription) error {
 			return fmt.Errorf("subscription %q already exists", sub.Name)
 		}
 	}
-	if !sub.Enabled {
-		sub.Enabled = true
-	}
+	sub.Enabled = true
 	m.Cfg.Subs = append(m.Cfg.Subs, sub)
 	return m.Cfg.Save(m.ConfigPath)
 }
