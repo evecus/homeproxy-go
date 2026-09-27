@@ -2,6 +2,7 @@ package resources
 
 import (
 	"bufio"
+	"encoding/base64"
 	"fmt"
 	"io"
 	"net/http"
@@ -14,103 +15,201 @@ import (
 )
 
 const (
-	defaultChinaIP4 = "https://raw.githubusercontent.com/fernvenue/chn-cidr-list/master/ipv4.txt"
-	defaultChinaIP6 = "https://raw.githubusercontent.com/fernvenue/chn-cidr-list/master/ipv6.txt"
-	defaultGFWList  = "https://raw.githubusercontent.com/gfwlist/gfwlist/master/gfwlist.txt"
+	FileChinaIP4 = "china_ip4.txt"
+	FileChinaIP6 = "china_ip6.txt"
+	FileGFWList  = "gfw_list.txt"
 )
 
-// Updater downloads china IP lists and optional GFW list into data_dir.
-type Updater struct {
+type Manager struct {
 	Cfg *config.Config
+	Dir string
 }
 
-func New(cfg *config.Config) *Updater {
-	return &Updater{Cfg: cfg}
+func NewManager(cfg *config.Config) *Manager {
+	dir := filepath.Join(cfg.Paths.DataDir, "resources")
+	return &Manager{Cfg: cfg, Dir: dir}
 }
 
-func (u *Updater) Update() error {
-	dir := u.Cfg.Paths.DataDir
-	if dir == "" {
-		dir = "/var/lib/homeproxy"
-	}
-	if err := os.MkdirAll(dir, 0o755); err != nil {
+func (m *Manager) EnsureDir() error {
+	return os.MkdirAll(m.Dir, 0o755)
+}
+
+func (m *Manager) Path(name string) string {
+	return filepath.Join(m.Dir, name)
+}
+
+func (m *Manager) UpdateAll() error {
+	if err := m.EnsureDir(); err != nil {
 		return err
 	}
-	ip4 := u.Cfg.Paths.ChinaIP4URL
-	if ip4 == "" {
-		ip4 = defaultChinaIP4
+	var errs []string
+	if err := m.UpdateChinaIP4(); err != nil {
+		errs = append(errs, "china_ip4: "+err.Error())
 	}
-	ip6 := u.Cfg.Paths.ChinaIP6URL
-	if ip6 == "" {
-		ip6 = defaultChinaIP6
+	if err := m.UpdateChinaIP6(); err != nil {
+		errs = append(errs, "china_ip6: "+err.Error())
 	}
-	gfw := u.Cfg.Paths.GFWListURL
-	if gfw == "" {
-		gfw = defaultGFWList
+	if err := m.UpdateGFWList(); err != nil {
+		errs = append(errs, "gfw_list: "+err.Error())
 	}
-
-	if err := downloadText(ip4, filepath.Join(dir, "china_ip4.txt")); err != nil {
-		return fmt.Errorf("china_ip4: %w", err)
-	}
-	if err := downloadText(ip6, filepath.Join(dir, "china_ip6.txt")); err != nil {
-		return fmt.Errorf("china_ip6: %w", err)
-	}
-	// GFW list is base64; store raw for optional DNS tooling; not required for nft sets alone
-	if err := downloadText(gfw, filepath.Join(dir, "gfwlist.txt")); err != nil {
-		// non-fatal
-		_ = err
+	if len(errs) > 0 {
+		return fmt.Errorf(strings.Join(errs, "; "))
 	}
 	return nil
 }
 
-func downloadText(url, dest string) error {
-	client := &http.Client{Timeout: 120 * time.Second}
-	resp, err := client.Get(url)
+func (m *Manager) UpdateChinaIP4() error {
+	return downloadLines(m.Cfg.Paths.ChinaIP4URL, m.Path(FileChinaIP4), isIPv4CIDR)
+}
+
+func (m *Manager) UpdateChinaIP6() error {
+	if m.Cfg.Paths.ChinaIP6URL == "" {
+		return nil
+	}
+	return downloadLines(m.Cfg.Paths.ChinaIP6URL, m.Path(FileChinaIP6), isIPv6CIDR)
+}
+
+func (m *Manager) UpdateGFWList() error {
+	body, err := httpGet(m.Cfg.Paths.GFWListURL)
 	if err != nil {
 		return err
 	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		return fmt.Errorf("HTTP %d", resp.StatusCode)
-	}
-	tmp := dest + ".tmp"
-	f, err := os.Create(tmp)
+	decoded, err := base64.StdEncoding.DecodeString(strings.TrimSpace(string(body)))
 	if err != nil {
-		return err
+		decoded = body
 	}
-	_, err = io.Copy(f, resp.Body)
-	_ = f.Close()
-	if err != nil {
-		_ = os.Remove(tmp)
-		return err
+	domains := parseGFWList(string(decoded))
+	return writeLines(m.Path(FileGFWList), domains)
+}
+
+func (m *Manager) LoadChinaIP4() ([]string, error) {
+	return readLines(m.Path(FileChinaIP4))
+}
+
+func (m *Manager) LoadChinaIP6() ([]string, error) {
+	p := m.Path(FileChinaIP6)
+	if _, err := os.Stat(p); os.IsNotExist(err) {
+		return nil, nil
 	}
-	return os.Rename(tmp, dest)
+	return readLines(p)
 }
 
-// LoadChinaIP4 reads CIDR lines from data_dir/china_ip4.txt.
-func LoadChinaIP4(dataDir string) ([]string, error) {
-	return loadCIDRs(filepath.Join(dataDir, "china_ip4.txt"))
+func (m *Manager) LoadGFWList() ([]string, error) {
+	return readLines(m.Path(FileGFWList))
 }
 
-// LoadChinaIP6 reads CIDR lines from data_dir/china_ip6.txt.
-func LoadChinaIP6(dataDir string) ([]string, error) {
-	return loadCIDRs(filepath.Join(dataDir, "china_ip6.txt"))
-}
-
-func loadCIDRs(path string) ([]string, error) {
-	f, err := os.Open(path)
+func httpGet(url string) ([]byte, error) {
+	client := &http.Client{Timeout: 60 * time.Second}
+	req, err := http.NewRequest(http.MethodGet, url, nil)
 	if err != nil {
 		return nil, err
 	}
-	defer f.Close()
-	var out []string
-	sc := bufio.NewScanner(f)
+	req.Header.Set("User-Agent", "homeproxy-go/1.0")
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("HTTP %d for %s", resp.StatusCode, url)
+	}
+	return io.ReadAll(resp.Body)
+}
+
+func downloadLines(url, dest string, filter func(string) bool) error {
+	body, err := httpGet(url)
+	if err != nil {
+		return err
+	}
+	var lines []string
+	sc := bufio.NewScanner(strings.NewReader(string(body)))
 	for sc.Scan() {
 		line := strings.TrimSpace(sc.Text())
 		if line == "" || strings.HasPrefix(line, "#") {
 			continue
 		}
+		if filter != nil && !filter(line) {
+			continue
+		}
+		lines = append(lines, line)
+	}
+	return writeLines(dest, lines)
+}
+
+func writeLines(path string, lines []string) error {
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return err
+	}
+	f, err := os.Create(path)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+	w := bufio.NewWriter(f)
+	for _, l := range lines {
+		fmt.Fprintln(w, l)
+	}
+	return w.Flush()
+}
+
+func readLines(path string) ([]string, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return nil, err
+	}
+	defer f.Close()
+	var lines []string
+	sc := bufio.NewScanner(f)
+	buf := make([]byte, 0, 64*1024)
+	sc.Buffer(buf, 1024*1024)
+	for sc.Scan() {
+		line := strings.TrimSpace(sc.Text())
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+		lines = append(lines, line)
+	}
+	return lines, sc.Err()
+}
+
+func isIPv4CIDR(s string) bool {
+	return strings.Contains(s, ".") && !strings.Contains(s, ":")
+}
+
+func isIPv6CIDR(s string) bool {
+	return strings.Contains(s, ":")
+}
+
+func parseGFWList(content string) []string {
+	seen := map[string]struct{}{}
+	var out []string
+	sc := bufio.NewScanner(strings.NewReader(content))
+	for sc.Scan() {
+		line := strings.TrimSpace(sc.Text())
+		if line == "" || strings.HasPrefix(line, "!") || strings.HasPrefix(line, "[") {
+			continue
+		}
+		if strings.HasPrefix(line, "@@") {
+			continue
+		}
+		line = strings.TrimPrefix(line, "||")
+		line = strings.TrimPrefix(line, "|")
+		line = strings.TrimPrefix(line, ".")
+		if i := strings.IndexAny(line, "/^$*"); i >= 0 {
+			line = line[:i]
+		}
+		line = strings.Trim(line, " \t*")
+		if line == "" || strings.Contains(line, "*") {
+			continue
+		}
+		if !strings.Contains(line, ".") {
+			continue
+		}
+		if _, ok := seen[line]; ok {
+			continue
+		}
+		seen[line] = struct{}{}
 		out = append(out, line)
 	}
-	return out, sc.Err()
+	return out
 }
