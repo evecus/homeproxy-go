@@ -8,7 +8,6 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-// Routing modes aligned with OpenWrt homeproxy.
 const (
 	ModeGFWList             = "gfwlist"
 	ModeBypassMainlandChina = "bypass_mainland_china"
@@ -17,23 +16,21 @@ const (
 	ModeCustom              = "custom"
 )
 
-// Proxy modes for transparent interception.
 const (
 	ProxyTProxy   = "tproxy"
 	ProxyRedirect = "redirect"
 	ProxyTUN      = "tun"
 )
 
-// Config is the top-level YAML configuration.
 type Config struct {
-	Mode    string          `yaml:"mode"`
-	Proxy   ProxyConfig     `yaml:"proxy"`
-	DNS     DNSConfig       `yaml:"dns"`
-	Nodes   []Node          `yaml:"nodes"`
-	Subs    []Subscription  `yaml:"subscriptions"`
-	Control ControlConfig   `yaml:"control"`
-	Paths   PathsConfig     `yaml:"paths"`
-	Log     LogConfig       `yaml:"log"`
+	Mode    string         `yaml:"mode"`
+	Proxy   ProxyConfig    `yaml:"proxy"`
+	DNS     DNSConfig      `yaml:"dns"`
+	Nodes   []Node         `yaml:"nodes"`
+	Subs    []Subscription `yaml:"subscriptions"`
+	Control ControlConfig  `yaml:"control"`
+	Paths   PathsConfig    `yaml:"paths"`
+	Log     LogConfig      `yaml:"log"`
 }
 
 type ProxyConfig struct {
@@ -251,6 +248,18 @@ func Load(path string) (*Config, error) {
 	return &c, nil
 }
 
+func (c *Config) Save(path string) error {
+	data, err := yaml.Marshal(c)
+	if err != nil {
+		return err
+	}
+	tmp := path + ".tmp"
+	if err := os.WriteFile(tmp, data, 0o644); err != nil {
+		return err
+	}
+	return os.Rename(tmp, path)
+}
+
 func (c *Config) FindNode(name string) *Node {
 	for i := range c.Nodes {
 		if c.Nodes[i].Name == name {
@@ -261,9 +270,7 @@ func (c *Config) FindNode(name string) *Node {
 }
 
 func (c *Config) ModeNeedsChinaIP() bool {
-	return c.Mode == ModeBypassMainlandChina ||
-		c.Mode == ModeProxyMainlandChina ||
-		c.Control.BypassCNTraffic
+	return c.Mode == ModeBypassMainlandChina || c.Mode == ModeProxyMainlandChina || c.Control.BypassCNTraffic
 }
 
 func (c *Config) ModeNeedsGFWList() bool {
