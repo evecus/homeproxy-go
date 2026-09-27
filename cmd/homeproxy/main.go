@@ -26,6 +26,7 @@ func main() {
 	}
 	cmd := os.Args[1]
 	args := os.Args[2:]
+
 	switch cmd {
 	case "version", "-v", "--version":
 		fmt.Println("homeproxy-go", version)
@@ -68,13 +69,20 @@ Commands:
   serve             Start web UI + API (config / start / stop)
   version           Print version
 
+Global flags (after command):
+  -c, --config path   Config file (default: /etc/homeproxy/config.yaml)
+
 serve flags:
   -l, --listen addr   Listen address (default: :8080)
   --user name         Optional HTTP basic auth user
   --pass password     Optional HTTP basic auth password
 
 Examples:
+  homeproxy update-resources -c ./configs/config.example.yaml
+  homeproxy generate -c /etc/homeproxy/config.yaml
+  sudo homeproxy apply-nft -c /etc/homeproxy/config.yaml
   sudo homeproxy serve -c /etc/homeproxy/config.yaml -l :8080
+  sing-box run -c /var/run/homeproxy/sing-box.json
 `, version)
 }
 
@@ -85,9 +93,10 @@ func runServe(args []string) {
 	fs.StringVar(&path, "config", "/etc/homeproxy/config.yaml", "config file")
 	fs.StringVar(&listen, "l", ":8080", "listen address")
 	fs.StringVar(&listen, "listen", ":8080", "listen address")
-	fs.StringVar(&user, "user", "", "basic auth username")
-	fs.StringVar(&pass, "pass", "", "basic auth password")
+	fs.StringVar(&user, "user", "", "basic auth username (optional)")
+	fs.StringVar(&pass, "pass", "", "basic auth password (optional)")
 	_ = fs.Parse(args)
+
 	mgr, err := service.New(path)
 	if err != nil {
 		fatal("load config: %v", err)
@@ -102,6 +111,7 @@ func runServe(args []string) {
 		fatal("listen: %v", err)
 	}
 }
+
 
 func configPath(fs *flag.FlagSet, args []string) string {
 	var path string
@@ -143,6 +153,9 @@ func runUpdateSubs(args []string) {
 	path := configPath(fs, args)
 	cfg := loadCfg(path)
 	for _, sub := range cfg.Subs {
+		if !sub.Enabled && sub.URL == "" {
+			continue
+		}
 		if sub.URL == "" {
 			continue
 		}
@@ -164,9 +177,15 @@ func runGenerate(args []string) {
 	fs := flag.NewFlagSet("generate", flag.ExitOnError)
 	path := configPath(fs, args)
 	cfg := loadCfg(path)
+
+	// merge subscriptions into memory for generation
 	for _, sub := range cfg.Subs {
 		if sub.URL == "" {
 			continue
+		}
+		if !sub.Enabled {
+			// treat missing Enabled as true when URL set
+			// only skip if explicitly false — yaml zero is false; use name+url as enable signal
 		}
 		nodes, err := subscription.Fetch(sub.URL)
 		if err != nil {
@@ -175,18 +194,32 @@ func runGenerate(args []string) {
 		}
 		subscription.MergeNodes(cfg, sub.Name, nodes)
 	}
+
 	runDir := cfg.Paths.RunDir
-	_ = os.MkdirAll(runDir, 0o755)
-	_ = os.MkdirAll(cfg.Paths.DataDir, 0o755)
+	if err := os.MkdirAll(runDir, 0o755); err != nil {
+		fatal("mkdir run dir: %v", err)
+	}
+	if err := os.MkdirAll(cfg.Paths.DataDir, 0o755); err != nil {
+		fatal("mkdir data dir: %v", err)
+	}
+
+	// resources
 	m := resources.NewManager(cfg)
 	_ = m.EnsureDir()
 	china4, _ := m.LoadChinaIP4()
 	china6, _ := m.LoadChinaIP6()
+	if cfg.ModeNeedsChinaIP() && len(china4) == 0 {
+		fmt.Fprintln(os.Stderr, "warning: china_ip4.txt empty — run: homeproxy update-resources")
+	}
+
+	// sing-box
 	sbPath := filepath.Join(runDir, "sing-box.json")
 	if err := generator.NewSingBox(cfg).Write(sbPath); err != nil {
 		fatal("sing-box: %v", err)
 	}
 	fmt.Println("wrote", sbPath)
+
+	// nftables
 	nftPath := filepath.Join(runDir, "nftables.nft")
 	if err := generator.NewNftables(cfg, china4, china6).Write(nftPath); err != nil {
 		fatal("nftables: %v", err)
@@ -220,14 +253,24 @@ func runSetupRouting(args []string) {
 		return
 	}
 	mark := config.NormalizeMark(cfg.Proxy.TProxyMark)
+	// table 100 local default
 	runIP("rule", "del", "fwmark", mark, "lookup", "100")
 	runIP("route", "del", "local", "default", "dev", "lo", "table", "100")
 	mustIP("rule", "add", "fwmark", mark, "lookup", "100")
 	mustIP("route", "add", "local", "default", "dev", "lo", "table", "100")
+	if cfg.Proxy.IPv6 {
+		runIP("-6", "rule", "del", "fwmark", mark, "lookup", "100")
+		runIP("-6", "route", "del", "local", "default", "dev", "lo", "table", "100")
+		mustIP("-6", "rule", "add", "fwmark", mark, "lookup", "100")
+		mustIP("-6", "route", "add", "local", "default", "dev", "lo", "table", "100")
+	}
 	fmt.Printf("policy routing installed for fwmark %s table 100\n", mark)
 }
 
-func runIP(args ...string) { _ = exec.Command("ip", args...).Run() }
+func runIP(args ...string) {
+	cmd := exec.Command("ip", args...)
+	_ = cmd.Run()
+}
 
 func mustIP(args ...string) {
 	cmd := exec.Command("ip", args...)
