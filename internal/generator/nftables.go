@@ -193,6 +193,43 @@ func (n *Nftables) writeTProxy(b *strings.Builder) {
 		b.WriteString("    ip6 daddr { ::/128, ::1/128, fc00::/7, fe80::/10, ff00::/8 } return\n")
 	}
 
+	// Gaming mode: always direct
+	for _, ip := range cfg.Control.LANGamingIPv4 {
+		if ip = strings.TrimSpace(ip); ip != "" {
+			b.WriteString(fmt.Sprintf("    ip saddr %s return\n", ip))
+		}
+	}
+	if cfg.Proxy.IPv6 {
+		for _, ip := range cfg.Control.LANGamingIPv6 {
+			if ip = strings.TrimSpace(ip); ip != "" {
+				b.WriteString(fmt.Sprintf("    ip6 saddr %s return\n", ip))
+			}
+		}
+	}
+	for _, mac := range cfg.Control.LANGamingMAC {
+		if mac = strings.TrimSpace(mac); mac != "" {
+			b.WriteString(fmt.Sprintf("    ether saddr %s return\n", mac))
+		}
+	}
+	// Global proxy devices: force tproxy
+	for _, ip := range cfg.Control.LANGlobalProxyIPv4 {
+		if ip = strings.TrimSpace(ip); ip != "" {
+			b.WriteString(fmt.Sprintf("    ip saddr %s goto hp_do_tproxy\n", ip))
+		}
+	}
+	if cfg.Proxy.IPv6 {
+		for _, ip := range cfg.Control.LANGlobalProxyIPv6 {
+			if ip = strings.TrimSpace(ip); ip != "" {
+				b.WriteString(fmt.Sprintf("    ip6 saddr %s goto hp_do_tproxy\n", ip))
+			}
+		}
+	}
+	for _, mac := range cfg.Control.LANGlobalProxyMAC {
+		if mac = strings.TrimSpace(mac); mac != "" {
+			b.WriteString(fmt.Sprintf("    ether saddr %s goto hp_do_tproxy\n", mac))
+		}
+	}
+
 	// LAN ACL (homeproxy-style lan_proxy_mode)
 	switch cfg.Control.LANProxyMode {
 	case config.LANProxyExceptListed:

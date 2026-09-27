@@ -82,12 +82,27 @@ func (s *SingBox) buildDNS() map[string]any {
 	}
 
 	mainDNS := map[string]any{
-		"tag":     "main-dns",
-		"address": ensureDNSAddr(cfg.DNS.Server),
-		"detour":  "main-out",
+		"tag":      "main-dns",
+		"address":  ensureDNSAddr(cfg.DNS.Server),
+		"detour":   "main-out",
 		"strategy": cfg.DNS.Strategy,
 	}
 	servers = append(servers, mainDNS)
+
+	for _, es := range cfg.DNS.ExtraServers {
+		if es.Tag == "" || es.Address == "" {
+			continue
+		}
+		detour := es.Detour
+		if detour == "" {
+			detour = "direct-out"
+		}
+		servers = append(servers, map[string]any{
+			"tag":     es.Tag,
+			"address": ensureDNSAddr(es.Address),
+			"detour":  detour,
+		})
+	}
 
 	rules := []any{}
 	final := "main-dns"
@@ -223,9 +238,30 @@ func (s *SingBox) buildOutbounds() ([]any, error) {
 
 	// main-out selector / urltest
 	mainTag := "main-out"
-	if cfg.Proxy.MainNode == "urltest" {
+	outbounds = append(outbounds, s.buildGroupOutbound(mainTag, cfg.Proxy.MainNode, cfg.Proxy.URLTestNodes)...)
+
+	// main-udp-out (homeproxy main_udp_node)
+	udpNode := cfg.Proxy.MainUDP
+	if udpNode == "" || udpNode == "same" {
+		outbounds = append(outbounds, map[string]any{
+			"type":      "selector",
+			"tag":       "main-udp-out",
+			"outbounds": []string{mainTag},
+			"default":   mainTag,
+		})
+	} else {
+		outbounds = append(outbounds, s.buildGroupOutbound("main-udp-out", udpNode, cfg.Proxy.URLTestUDPNodes)...)
+	}
+
+	return outbounds, nil
+}
+
+// buildGroupOutbound returns urltest or selector outbound for tag.
+func (s *SingBox) buildGroupOutbound(tag, mainNode string, urltestNodes []string) []any {
+	cfg := s.Cfg
+	if mainNode == "urltest" {
 		tags := []string{}
-		for _, name := range cfg.Proxy.URLTestNodes {
+		for _, name := range urltestNodes {
 			tags = append(tags, nodeTag(name))
 		}
 		if len(tags) == 0 {
@@ -233,37 +269,35 @@ func (s *SingBox) buildOutbounds() ([]any, error) {
 				tags = append(tags, nodeTag(n.Name))
 			}
 		}
-		outbounds = append(outbounds, map[string]any{
+		if len(tags) == 0 {
+			return []any{map[string]any{"type": "direct", "tag": tag}}
+		}
+		return []any{map[string]any{
 			"type":      "urltest",
-			"tag":       mainTag,
+			"tag":       tag,
 			"outbounds": tags,
 			"interval":  fmt.Sprintf("%ds", cfg.Proxy.URLTestInterval),
 			"tolerance": cfg.Proxy.URLTestTolerance,
-		})
-	} else if cfg.Proxy.MainNode != "" {
-		// selector wrapping single node, or direct reference via selector for flexibility
-		outbounds = append(outbounds, map[string]any{
-			"type":      "selector",
-			"tag":       mainTag,
-			"outbounds": []string{nodeTag(cfg.Proxy.MainNode)},
-			"default":   nodeTag(cfg.Proxy.MainNode),
-		})
-	} else if len(cfg.Nodes) > 0 {
-		outbounds = append(outbounds, map[string]any{
-			"type":      "selector",
-			"tag":       mainTag,
-			"outbounds": []string{nodeTag(cfg.Nodes[0].Name)},
-			"default":   nodeTag(cfg.Nodes[0].Name),
-		})
-	} else {
-		// placeholder so config is valid; user must add nodes
-		outbounds = append(outbounds, map[string]any{
-			"type": "direct",
-			"tag":  mainTag,
-		})
+		}}
 	}
-
-	return outbounds, nil
+	if mainNode != "" {
+		return []any{map[string]any{
+			"type":      "selector",
+			"tag":       tag,
+			"outbounds": []string{nodeTag(mainNode)},
+			"default":   nodeTag(mainNode),
+		}}
+	}
+	if len(cfg.Nodes) > 0 {
+		t := nodeTag(cfg.Nodes[0].Name)
+		return []any{map[string]any{
+			"type":      "selector",
+			"tag":       tag,
+			"outbounds": []string{t},
+			"default":   t,
+		}}
+	}
+	return []any{map[string]any{"type": "direct", "tag": tag}}
 }
 
 func (s *SingBox) buildRoute() map[string]any {
@@ -304,7 +338,7 @@ func (s *SingBox) buildRoute() map[string]any {
 		)
 	}
 
-	// User domain black/white lists (highest priority after DNS hijack)
+	// User domain black/white lists
 	if len(cfg.Control.DirectDomains) > 0 {
 		rules = append(rules, map[string]any{
 			"domain":   cfg.Control.DirectDomains,
@@ -318,11 +352,56 @@ func (s *SingBox) buildRoute() map[string]any {
 		})
 	}
 
+	// Custom route rules (always applied when enabled)
+	for _, rr := range cfg.Rules {
+		if !rr.Enabled {
+			continue
+		}
+		r := map[string]any{}
+		ob := rr.Outbound
+		if ob == "" {
+			ob = "main-out"
+		}
+		r["outbound"] = ob
+		if len(rr.Domain) > 0 {
+			r["domain"] = rr.Domain
+		}
+		if len(rr.DomainSuffix) > 0 {
+			r["domain_suffix"] = rr.DomainSuffix
+		}
+		if len(rr.DomainKeyword) > 0 {
+			r["domain_keyword"] = rr.DomainKeyword
+		}
+		if len(rr.IPCIDR) > 0 {
+			r["ip_cidr"] = rr.IPCIDR
+		}
+		if len(rr.SourceIPCIDR) > 0 {
+			r["source_ip_cidr"] = rr.SourceIPCIDR
+		}
+		if len(rr.Port) > 0 {
+			r["port"] = rr.Port
+		}
+		if rr.Network != "" {
+			r["network"] = rr.Network
+		}
+		if len(rr.Protocol) > 0 {
+			r["protocol"] = rr.Protocol
+		}
+		rules = append(rules, r)
+	}
+
+	// UDP → main-udp-out when dedicated UDP node configured
+	if cfg.Proxy.MainUDP != "" && cfg.Proxy.MainUDP != "same" {
+		rules = append(rules, map[string]any{
+			"network":  "udp",
+			"outbound": "main-udp-out",
+		})
+	}
+
 	final := "main-out"
 
 	switch cfg.Mode {
 	case config.ModeBypassMainlandChina:
-		// Domain/IP China → direct inside sing-box (firewall also bypasses CN CIDRs)
 		rules = append(rules,
 			map[string]any{"rule_set": "geosite-cn", "outbound": "direct-out"},
 			map[string]any{"rule_set": "geoip-cn", "outbound": "direct-out"},
@@ -335,7 +414,14 @@ func (s *SingBox) buildRoute() map[string]any {
 		)
 		final = "direct-out"
 	case config.ModeGFWList:
-		// Without dedicated DNS nftset, approximate with non-CN geosite → proxy
+		// Prefer local gfw domain list if present (from update-resources)
+		gfwPath := filepath.Join(cfg.Paths.DataDir, "resources", "gfw_list.txt")
+		if domains := loadDomainFile(gfwPath, 5000); len(domains) > 0 {
+			rules = append(rules, map[string]any{
+				"domain":   domains,
+				"outbound": "main-out",
+			})
+		}
 		rules = append(rules,
 			map[string]any{"rule_set": "geosite-noncn", "outbound": "main-out"},
 			map[string]any{"rule_set": "geosite-cn", "outbound": "direct-out"},
@@ -346,7 +432,6 @@ func (s *SingBox) buildRoute() map[string]any {
 		final = "main-out"
 	case config.ModeCustom:
 		final = "main-out"
-		// custom rules can be extended later from YAML
 	}
 
 	// private IPs always direct
@@ -452,8 +537,27 @@ func ensureDNSAddr(s string) string {
 	if strings.Contains(s, "://") {
 		return s
 	}
-	// plain IP or host → udp
 	return "udp://" + s
+}
+
+// loadDomainFile reads domain lines (maxN) for GFW-style lists.
+func loadDomainFile(path string, maxN int) []string {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil
+	}
+	var out []string
+	for _, line := range strings.Split(string(data), "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+		out = append(out, line)
+		if maxN > 0 && len(out) >= maxN {
+			break
+		}
+	}
+	return out
 }
 
 func atoiSafe(s string) any {
