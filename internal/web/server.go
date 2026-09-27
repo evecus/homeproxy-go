@@ -51,7 +51,10 @@ func (s *Server) routes() {
 	s.Mux.HandleFunc("/api/delay", s.handleDelay)
 	s.Mux.HandleFunc("/api/logs", s.handleLogs)
 	s.Mux.HandleFunc("/api/proxies", s.handleProxies)
+	s.Mux.HandleFunc("/api/cert/issue", s.handleCertIssue)
+	s.Mux.HandleFunc("/api/delay/all", s.handleDelayAll)
 }
+
 
 
 func (s *Server) Handler() http.Handler {
@@ -433,4 +436,30 @@ func (s *Server) handleProxies(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, data)
+}
+
+func (s *Server) handleCertIssue(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	data, err := s.Mgr.IssueCertificate()
+	if err != nil {
+		writeErr(w, http.StatusBadRequest, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, data)
+}
+
+func (s *Server) handleDelayAll(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet && r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	data, err := s.Mgr.DelayAll(4000)
+	if err != nil {
+		writeErr(w, http.StatusBadRequest, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"results": data})
 }

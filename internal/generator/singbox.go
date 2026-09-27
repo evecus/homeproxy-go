@@ -598,6 +598,15 @@ func nodeToOutbound(n *config.Node, selfMark string) (map[string]any, error) {
 	case "shadowsocks":
 		ob["method"] = n.Method
 		ob["password"] = n.Password
+		if n.Plugin != "" {
+			ob["plugin"] = n.Plugin
+			if n.PluginOpts != "" {
+				ob["plugin_opts"] = n.PluginOpts
+			}
+		}
+		if n.UDPOverTCP {
+			ob["udp_over_tcp"] = true
+		}
 	case "vmess":
 		ob["uuid"] = n.UUID
 		if n.AlterID > 0 {
@@ -605,6 +614,9 @@ func nodeToOutbound(n *config.Node, selfMark string) (map[string]any, error) {
 		}
 		if n.Network != "" {
 			ob["network"] = n.Network
+		}
+		if n.PacketEncoding != "" {
+			ob["packet_encoding"] = n.PacketEncoding
 		}
 	case "vless":
 		ob["uuid"] = n.UUID
@@ -614,19 +626,71 @@ func nodeToOutbound(n *config.Node, selfMark string) (map[string]any, error) {
 		if n.Network != "" {
 			ob["network"] = n.Network
 		}
+		if n.PacketEncoding != "" {
+			ob["packet_encoding"] = n.PacketEncoding
+		}
 	case "trojan":
 		ob["password"] = n.Password
 	case "hysteria2":
 		ob["password"] = n.Password
+		if n.UpMbps > 0 {
+			ob["up_mbps"] = n.UpMbps
+		}
+		if n.DownMbps > 0 {
+			ob["down_mbps"] = n.DownMbps
+		}
+		if n.Obfs != "" {
+			ob["obfs"] = map[string]any{"type": n.Obfs, "password": n.ObfsPassword}
+		}
+	case "hysteria":
+		ob["password"] = n.Password
+		if n.UpMbps > 0 {
+			ob["up_mbps"] = n.UpMbps
+		}
+		if n.DownMbps > 0 {
+			ob["down_mbps"] = n.DownMbps
+		}
 	case "tuic":
 		ob["uuid"] = n.UUID
 		ob["password"] = n.Password
+		if n.CongestionControl != "" {
+			ob["congestion_control"] = n.CongestionControl
+		}
+		if n.UDPRelayMode != "" {
+			ob["udp_relay_mode"] = n.UDPRelayMode
+		}
+		if n.ZeroRTT {
+			ob["zero_rtt_handshake"] = true
+		}
+		if n.Heartbeat != "" {
+			ob["heartbeat"] = n.Heartbeat
+		}
 	case "wireguard":
-		// fields via Extra: private_key, peer_public_key, local_address, ...
-	default:
+		if n.PrivateKey != "" {
+			ob["private_key"] = n.PrivateKey
+		}
+		if n.PeerPublicKey != "" {
+			ob["peer_public_key"] = n.PeerPublicKey
+		}
+		if n.PreSharedKey != "" {
+			ob["pre_shared_key"] = n.PreSharedKey
+		}
+		if len(n.LocalAddress) > 0 {
+			ob["local_address"] = n.LocalAddress
+		}
+		if n.MTU > 0 {
+			ob["mtu"] = n.MTU
+		}
+		// wireguard uses "server" as peer endpoint already
 	}
 
-	// Structured transport → sing-box transport object
+	if n.Multiplex {
+		ob["multiplex"] = map[string]any{"enabled": true}
+	}
+	if n.TCPFastOpen {
+		ob["tcp_fast_open"] = true
+	}
+
 	if n.TransportType != "" {
 		tr := map[string]any{"type": n.TransportType}
 		switch n.TransportType {
@@ -636,6 +700,9 @@ func nodeToOutbound(n *config.Node, selfMark string) (map[string]any, error) {
 			}
 			if n.WSHost != "" {
 				tr["headers"] = map[string]any{"Host": n.WSHost}
+			}
+			if n.WSMaxEarlyData > 0 {
+				tr["max_early_data"] = n.WSMaxEarlyData
 			}
 		case "grpc":
 			if n.GRPCService != "" {
@@ -676,11 +743,17 @@ func nodeToOutbound(n *config.Node, selfMark string) (map[string]any, error) {
 				"short_id":   n.TLS.RealityShortID,
 			}
 		}
+		if n.TLS.ECHEnabled {
+			ech := map[string]any{"enabled": true}
+			if n.TLS.ECHConfig != "" {
+				ech["config"] = n.TLS.ECHConfig
+			}
+			tls["ech"] = ech
+		}
 		ob["tls"] = tls
 	}
 
 	if n.Transport != nil {
-		// merge raw transport map (overrides structured if both set keys)
 		if existing, ok := ob["transport"].(map[string]any); ok {
 			for k, v := range n.Transport {
 				existing[k] = v

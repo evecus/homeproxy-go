@@ -14,6 +14,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/evecus/homeproxy-go/internal/cert"
 	"github.com/evecus/homeproxy-go/internal/config"
 	"github.com/evecus/homeproxy-go/internal/generator"
 	"github.com/evecus/homeproxy-go/internal/resources"
@@ -639,6 +640,39 @@ func (m *Manager) ListProxies() (map[string]any, error) {
 	var out map[string]any
 	if err := json.Unmarshal(body, &out); err != nil {
 		return nil, err
+	}
+	return out, nil
+}
+
+
+// IssueCertificate runs ACME / self-signed issuance.
+func (m *Manager) IssueCertificate() (map[string]string, error) {
+	m.mu.Lock()
+	cfg := m.Cfg
+	m.mu.Unlock()
+	certPath, keyPath, err := cert.Issue(cfg)
+	if err != nil {
+		return nil, err
+	}
+	return map[string]string{"certificate": certPath, "key": keyPath}, nil
+}
+
+// DelayAll tests delay for all nodes (sequential, capped).
+func (m *Manager) DelayAll(timeoutMs int) ([]map[string]any, error) {
+	m.mu.Lock()
+	names := make([]string, 0, len(m.Cfg.Nodes))
+	for _, n := range m.Cfg.Nodes {
+		names = append(names, n.Name)
+	}
+	m.mu.Unlock()
+	var out []map[string]any
+	for _, name := range names {
+		d, err := m.ProxyDelay(name, "", timeoutMs)
+		if err != nil {
+			out = append(out, map[string]any{"name": name, "error": err.Error()})
+			continue
+		}
+		out = append(out, d)
 	}
 	return out, nil
 }

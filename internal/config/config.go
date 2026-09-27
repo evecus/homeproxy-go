@@ -36,6 +36,7 @@ type Config struct {
 	Control ControlConfig  `yaml:"control"`
 	DNSMasq DNSMasqConfig  `yaml:"dnsmasq"`
 	Clash   ClashConfig    `yaml:"clash"`
+	ACME    ACMEConfig     `yaml:"acme"`
 	Paths   PathsConfig    `yaml:"paths"`
 	Log     LogConfig      `yaml:"log"`
 }
@@ -154,40 +155,81 @@ type DNSRule struct {
 
 type Node struct {
 	Name     string `yaml:"name"`
-	Type     string `yaml:"type"` // shadowsocks, vmess, vless, trojan, hysteria2, tuic, wireguard, ...
+	Type     string `yaml:"type"`
 	Server   string `yaml:"server"`
 	Port     int    `yaml:"port"`
 	UUID     string `yaml:"uuid,omitempty"`
 	Password string `yaml:"password,omitempty"`
-	Method   string `yaml:"method,omitempty"` // ss
-	Network  string `yaml:"network,omitempty"` // tcp/udp for some protocols
-	Flow     string `yaml:"flow,omitempty"`    // xtls-rprx-vision
+	Method   string `yaml:"method,omitempty"`
+	Network  string `yaml:"network,omitempty"`
+	Flow     string `yaml:"flow,omitempty"`
 	AlterID  int    `yaml:"alter_id,omitempty"`
-	// Transport (structured; also merged into Transport map if set)
-	TransportType string `yaml:"transport_type,omitempty"` // ws | grpc | http | httpupgrade | ""
+	// Multiplex / TCP
+	Multiplex      bool   `yaml:"multiplex,omitempty"`
+	TCPFastOpen    bool   `yaml:"tcp_fast_open,omitempty"`
+	UDPOverTCP     bool   `yaml:"udp_over_tcp,omitempty"`
+	PacketEncoding string `yaml:"packet_encoding,omitempty"` // xudp | packetaddr
+	// Shadowsocks plugin
+	Plugin     string `yaml:"plugin,omitempty"`
+	PluginOpts string `yaml:"plugin_opts,omitempty"`
+	// Hysteria2 / Hysteria
+	UpMbps      int    `yaml:"up_mbps,omitempty"`
+	DownMbps    int    `yaml:"down_mbps,omitempty"`
+	Obfs        string `yaml:"obfs,omitempty"`
+	ObfsPassword string `yaml:"obfs_password,omitempty"`
+	HopInterval string `yaml:"hop_interval,omitempty"`
+	// TUIC
+	CongestionControl string `yaml:"congestion_control,omitempty"` // cubic | bbr | new_reno
+	UDPRelayMode      string `yaml:"udp_relay_mode,omitempty"`     // native | quic
+	ZeroRTT           bool   `yaml:"zero_rtt_handshake,omitempty"`
+	Heartbeat         string `yaml:"heartbeat,omitempty"`
+	// WireGuard
+	PrivateKey     string   `yaml:"private_key,omitempty"`
+	PeerPublicKey  string   `yaml:"peer_public_key,omitempty"`
+	PreSharedKey   string   `yaml:"pre_shared_key,omitempty"`
+	LocalAddress   []string `yaml:"local_address,omitempty"`
+	MTU            int      `yaml:"mtu,omitempty"`
+	// Transport
+	TransportType string `yaml:"transport_type,omitempty"`
 	WSPath        string `yaml:"ws_path,omitempty"`
 	WSHost        string `yaml:"ws_host,omitempty"`
+	WSMaxEarlyData int   `yaml:"ws_max_early_data,omitempty"`
 	GRPCService   string `yaml:"grpc_service,omitempty"`
 	HTTPPath      string `yaml:"http_path,omitempty"`
 	HTTPHost      string `yaml:"http_host,omitempty"`
-	TLS           *TLSConfig      `yaml:"tls,omitempty"`
-	Transport     map[string]any  `yaml:"transport,omitempty"`
-	Extra         map[string]any  `yaml:"extra,omitempty"`
+	TLS           *TLSConfig     `yaml:"tls,omitempty"`
+	Transport     map[string]any `yaml:"transport,omitempty"`
+	Extra         map[string]any `yaml:"extra,omitempty"`
 }
 
 type TLSConfig struct {
-	Enabled    bool     `yaml:"enabled"`
-	ServerName string   `yaml:"server_name"`
-	Insecure   bool     `yaml:"insecure"`
-	ALPN       []string `yaml:"alpn,omitempty"`
-	UTLS       string   `yaml:"utls,omitempty"` // chrome, firefox, safari, ios, android, edge, 360, qq, random
-	// Reality
-	RealityEnabled   bool   `yaml:"reality_enabled,omitempty"`
-	RealityPublicKey string `yaml:"reality_public_key,omitempty"`
-	RealityShortID   string `yaml:"reality_short_id,omitempty"`
-	// Certificate files (server side / client verify)
-	CertificatePath string `yaml:"certificate_path,omitempty"`
-	KeyPath         string `yaml:"key_path,omitempty"`
+	Enabled         bool     `yaml:"enabled"`
+	ServerName      string   `yaml:"server_name"`
+	Insecure        bool     `yaml:"insecure"`
+	ALPN            []string `yaml:"alpn,omitempty"`
+	UTLS            string   `yaml:"utls,omitempty"`
+	RealityEnabled  bool     `yaml:"reality_enabled,omitempty"`
+	RealityPublicKey string  `yaml:"reality_public_key,omitempty"`
+	RealityShortID  string   `yaml:"reality_short_id,omitempty"`
+	CertificatePath string   `yaml:"certificate_path,omitempty"`
+	KeyPath         string   `yaml:"key_path,omitempty"`
+	ECHEnabled      bool     `yaml:"ech_enabled,omitempty"`
+	ECHConfig       string   `yaml:"ech_config,omitempty"`
+}
+
+// ACMEConfig for automatic certificates (server inbounds).
+type ACMEConfig struct {
+	Enabled   bool     `yaml:"enabled"`
+	Email     string   `yaml:"email"`
+	Domains   []string `yaml:"domains"`
+	// self_signed | certbot | acme_sh
+	Provider  string   `yaml:"provider"`
+	// Output directory (default: data_dir/certs)
+	CertDir   string   `yaml:"cert_dir"`
+	// certbot/acme.sh extra args
+	ExtraArgs string   `yaml:"extra_args,omitempty"`
+	// HTTP-01 listen port for standalone (certbot)
+	HTTPPort  int      `yaml:"http_port,omitempty"`
 }
 
 type Subscription struct {

@@ -46,6 +46,7 @@ table{width:100%;border-collapse:collapse;font-size:.85rem}th,td{text-align:left
 <button type="button" data-t="acl">访问控制</button>
 <button type="button" data-t="server">入站服务</button>
 <button type="button" data-t="traffic">流量</button>
+<button type="button" data-t="cert">证书</button>
 <button type="button" data-t="tools">工具</button>
 </div>
 
@@ -177,6 +178,30 @@ table{width:100%;border-collapse:collapse;font-size:.85rem}th,td{text-align:left
 </div>
 </div>
 </details>
+
+<details style="margin:.5rem 0"><summary class="hint">协议扩展字段（Hysteria2 / TUIC / WireGuard / SS Plugin）</summary>
+<div class="grid2">
+<div>
+<label>SS Plugin / Opts</label><input id="nplugin" placeholder="v2ray-plugin"/><input id="npluginopts"/>
+<label>Hysteria 上行/下行 Mbps</label>
+<div class="row"><input id="nhyup" type="number" placeholder="up"/><input id="nhydown" type="number" placeholder="down"/></div>
+<label>Hysteria Obfs / 密码</label><input id="nhyobfs"/><input id="nhyobfspw"/>
+<label>Packet Encoding</label><select id="npkt"><option value="">—</option><option>xudp</option><option>packetaddr</option></select>
+</div>
+<div>
+<label>TUIC 拥塞 / UDP 模式</label>
+<select id="ntuicc"><option value="">—</option><option>bbr</option><option>cubic</option><option>new_reno</option></select>
+<select id="ntuiudp"><option value="">—</option><option>native</option><option>quic</option></select>
+<label>WireGuard 私钥</label><input id="nwgpriv"/>
+<label>WireGuard 对端公钥</label><input id="nwgpub"/>
+<label>WG 本地地址（逗号）</label><input id="nwglocal" placeholder="10.0.0.2/32"/>
+<label>Multiplex / TFO</label>
+<select id="nmux"><option value="0">关</option><option value="1">开</option></select>
+<select id="ntfo"><option value="0">关</option><option value="1">开</option></select>
+</div>
+</div>
+</details>
+
 <button type="button" id="bAdd">添加并保存</button>
 </div></div>
 
@@ -293,8 +318,28 @@ table{width:100%;border-collapse:collapse;font-size:.85rem}th,td{text-align:left
 <div class="card"><h2>Clash API 流量 / 连接</h2>
 <p class="hint">需在配置启用 clash.enabled，并已启动代理。</p>
 <button type="button" class="sec" id="bTraffic">刷新流量</button>
+<button type="button" class="sec" id="bDelayAll">全部节点测速</button>
+<label>自动测速间隔（秒，0=关）</label><input id="ldelayInt" type="number" value="30"/>
+<canvas id="lchart" width="900" height="220" style="width:100%;max-width:900px;background:#0d1219;border-radius:8px;margin:.5rem 0"></canvas>
+<div id="ldelayList" class="hint"></div>
 <pre id="tpre" style="max-height:360px;overflow:auto;font-size:.75rem;background:#0d1219;padding:.6rem;border-radius:8px"></pre>
 <div class="msg" id="tmsg"></div>
+</div></div>
+
+
+<div id="cert" class="panel">
+<div class="card"><h2>证书自动申请</h2>
+<p class="hint">self_signed：本地自签（立即）；certbot / acme_sh：需 80 端口可达且已安装对应工具。</p>
+<label>启用 ACME</label><select id="acmeEn"><option value="0">否</option><option value="1">是</option></select>
+<label>Provider</label>
+<select id="acmeProv"><option>self_signed</option><option>certbot</option><option>acme_sh</option></select>
+<label>邮箱</label><input id="acmeEmail"/>
+<label>域名（逗号分隔）</label><input id="acmeDom" placeholder="vpn.example.com"/>
+<label>证书目录</label><input id="acmeDir" placeholder="/var/lib/homeproxy/certs"/>
+<button type="button" id="bSaveACME">保存 ACME 配置</button>
+<button type="button" class="ok" id="bIssue">立即签发</button>
+<div class="msg" id="cmsg"></div>
+<pre id="cpre" style="font-size:.75rem"></pre>
 </div></div>
 
 <div id="tools" class="panel">
@@ -404,6 +449,13 @@ function fill(c){
       tr.lastChild.appendChild(bd); drt.appendChild(tr);
     });}
   }
+  if($('acmeEn')&&c.acme){
+    $('acmeEn').value=c.acme.enabled?'1':'0';
+    if($('acmeProv'))$('acmeProv').value=c.acme.provider||'self_signed';
+    if($('acmeEmail'))$('acmeEmail').value=c.acme.email||'';
+    if($('acmeDom'))$('acmeDom').value=(c.acme.domains||[]).join(',');
+    if($('acmeDir'))$('acmeDir').value=c.acme.cert_dir||'';
+  }
   const ctl=c.control||{};
   $('lpm').value=ctl.lan_proxy_mode||'all';
   $('lanD4').value=join(ctl.lan_direct_ipv4);
@@ -446,7 +498,17 @@ $('bAdd').onclick=async()=>{try{const c=baseClient();c.nodes=c.nodes||[];const t
 if(sni||utls||($('nrealen')&&$('nrealen').value==='1')){n.tls={enabled:true,server_name:sni||undefined,utls:utls||undefined};
 if($('nrealen')&&$('nrealen').value==='1'){n.tls.reality_enabled=true;n.tls.reality_public_key=$('nrealpub').value.trim();n.tls.reality_short_id=$('nrealid').value.trim()}}
 if($('ntr')&&$('ntr').value){n.transport_type=$('ntr').value;n.ws_path=$('npath').value.trim();n.ws_host=$('nhost').value.trim();n.grpc_service=$('ngrpc').value.trim();n.http_path=$('npath').value.trim();n.http_host=$('nhost').value.trim()}
-if($('nflow')&&$('nflow').value.trim())n.flow=$('nflow').value.trim();c.nodes.push(n);if(!c.proxy.main_node)c.proxy.main_node=n.name;await api('/config',{method:'PUT',body:JSON.stringify(c)});msg($('nmmsg'),'已添加',1);await loadCfg()}catch(e){msg($('nmmsg'),e.message,0)}};
+if($('nflow')&&$('nflow').value.trim())n.flow=$('nflow').value.trim();
+if($('nplugin')&&$('nplugin').value){n.plugin=$('nplugin').value;n.plugin_opts=$('npluginopts').value}
+if($('nhyup')&&$('nhyup').value){n.up_mbps=+$('nhyup').value;n.down_mbps=+$('nhydown').value}
+if($('nhyobfs')&&$('nhyobfs').value){n.obfs=$('nhyobfs').value;n.obfs_password=$('nhyobfspw').value}
+if($('npkt')&&$('npkt').value)n.packet_encoding=$('npkt').value;
+if($('ntuicc')&&$('ntuicc').value)n.congestion_control=$('ntuicc').value;
+if($('ntuiudp')&&$('ntuiudp').value)n.udp_relay_mode=$('ntuiudp').value;
+if($('nwgpriv')&&$('nwgpriv').value){n.private_key=$('nwgpriv').value;n.peer_public_key=$('nwgpub').value;n.local_address=($('nwglocal').value||'').split(',').map(s=>s.trim()).filter(Boolean)}
+if($('nmux')&&$('nmux').value==='1')n.multiplex=true;
+if($('ntfo')&&$('ntfo').value==='1')n.tcp_fast_open=true;
+c.nodes.push(n);if(!c.proxy.main_node)c.proxy.main_node=n.name;await api('/config',{method:'PUT',body:JSON.stringify(c)});msg($('nmmsg'),'已添加',1);await loadCfg()}catch(e){msg($('nmmsg'),e.message,0)}};
 
 $('bAddSub').onclick=async()=>{try{await api('/subscriptions',{method:'POST',body:JSON.stringify({name:$('subName').value.trim(),url:$('subURL').value.trim(),enabled:true})});msg($('submsg'),'订阅已添加，请点「更新」拉取节点',1);$('subName').value='';$('subURL').value='';await loadCfg()}catch(e){msg($('submsg'),e.message,0)}};
 $('bUpAll').onclick=async()=>{try{msg($('submsg'),'更新全部…',1);const r=await api('/subscriptions/update',{method:'POST',body:JSON.stringify({name:'',replace:true})});msg($('submsg'),'完成，节点变化 '+r.nodes_added,1);await loadCfg()}catch(e){msg($('submsg'),e.message,0)}};
@@ -473,6 +535,79 @@ await api('/config',{method:'PUT',body:JSON.stringify(c)});msg($('dmsg'),'额外
 $('bAddDR')&&($('bAddDR').onclick=async()=>{try{const c=baseClient();c.dns=c.dns||{};c.dns.rules=c.dns.rules||[];
 c.dns.rules.push({name:$('drname').value.trim()||'rule',enabled:true,server:$('drsrv').value.trim(),domain_suffix:lines($('drsuf').value),rule_set:$('drrs').value.trim()});
 await api('/config',{method:'PUT',body:JSON.stringify(c)});msg($('dmsg'),'DNS 规则已添加',1);await loadCfg()}catch(e){msg($('dmsg'),e.message,0)}});
+
+
+const delayHist=JSON.parse(localStorage.getItem('hp_delay_hist')||'{}');
+function pushDelay(name,ms){
+  if(!delayHist[name])delayHist[name]=[];
+  delayHist[name].push({t:Date.now(),ms:ms});
+  if(delayHist[name].length>60)delayHist[name]=delayHist[name].slice(-60);
+  localStorage.setItem('hp_delay_hist',JSON.stringify(delayHist));
+}
+function drawChart(){
+  const cv=$('lchart'); if(!cv)return;
+  const ctx=cv.getContext('2d');
+  const W=cv.width,H=cv.height;
+  ctx.fillStyle='#0d1219';ctx.fillRect(0,0,W,H);
+  const names=Object.keys(delayHist);
+  if(!names.length){ctx.fillStyle='#8b9bb4';ctx.fillText('暂无测速数据 — 点击「全部节点测速」或节点「测速」',16,24);return;}
+  const colors=['#3b82f6','#22c55e','#f59e0b','#ef4444','#a855f7','#06b6d4'];
+  let maxMs=100;
+  names.forEach(n=>delayHist[n].forEach(p=>{if(p.ms>maxMs)maxMs=p.ms}));
+  maxMs=Math.ceil(maxMs*1.1);
+  ctx.strokeStyle='#2d3a4f';ctx.beginPath();
+  for(let i=0;i<=4;i++){const y=H-20-(H-40)*i/4;ctx.moveTo(40,y);ctx.lineTo(W-10,y);}ctx.stroke();
+  ctx.fillStyle='#8b9bb4';ctx.font='11px sans-serif';ctx.fillText(maxMs+'ms',4,20);ctx.fillText('0',8,H-12);
+  names.forEach((name,idx)=>{
+    const pts=delayHist[name]; if(pts.length<1)return;
+    ctx.strokeStyle=colors[idx%colors.length];ctx.lineWidth=2;ctx.beginPath();
+    pts.forEach((p,i)=>{
+      const x=40+(W-50)*(pts.length===1?1:i/(pts.length-1));
+      const y=H-20-(H-40)*(p.ms/maxMs);
+      if(i===0)ctx.moveTo(x,y);else ctx.lineTo(x,y);
+    });
+    ctx.stroke();
+    ctx.fillStyle=colors[idx%colors.length];
+    ctx.fillText(name,50+idx*90,14);
+  });
+}
+async function runDelayAll(){
+  try{
+    msg($('tmsg'),'测速中…',1);
+    const d=await api('/delay/all');
+    const list=$('ldelayList'); if(list)list.innerHTML='';
+    (d.results||[]).forEach(r=>{
+      const ms=r.delay!=null?r.delay:null;
+      if(ms!=null) pushDelay(r.name||'?', ms);
+      if(list){const s=document.createElement('div');s.textContent=(r.name||'?')+': '+(ms!=null?ms+' ms':(r.error||JSON.stringify(r)));list.appendChild(s)}
+    });
+    drawChart();
+    msg($('tmsg'),'测速完成',1);
+  }catch(e){msg($('tmsg'),e.message,0)}
+}
+let delayTimer=null;
+function setupDelayTimer(){
+  if(delayTimer)clearInterval(delayTimer);
+  const sec=+$('ldelayInt')?.value||0;
+  if(sec>0)delayTimer=setInterval(runDelayAll, sec*1000);
+}
+$('bDelayAll')&&($('bDelayAll').onclick=()=>runDelayAll());
+$('ldelayInt')&&($('ldelayInt').onchange=setupDelayTimer);
+drawChart();
+
+$('bSaveACME')&&($('bSaveACME').onclick=async()=>{
+  try{const c=baseClient();c.acme=c.acme||{};
+  c.acme.enabled=$('acmeEn').value==='1';c.acme.provider=$('acmeProv').value;
+  c.acme.email=$('acmeEmail').value.trim();
+  c.acme.domains=($('acmeDom').value||'').split(',').map(s=>s.trim()).filter(Boolean);
+  c.acme.cert_dir=$('acmeDir').value.trim();
+  await api('/config',{method:'PUT',body:JSON.stringify(c)});msg($('cmsg'),'已保存',1);await loadCfg()}catch(e){msg($('cmsg'),e.message,0)}
+});
+$('bIssue')&&($('bIssue').onclick=async()=>{
+  try{msg($('cmsg'),'签发中…',1);const d=await api('/cert/issue',{method:'POST'});
+  $('cpre').textContent=JSON.stringify(d,null,2);msg($('cmsg'),'完成',1)}catch(e){msg($('cmsg'),e.message,0)}
+});
+// hook single node delay into chart
 
 $('bGen').onclick=async()=>{try{await api('/generate',{method:'POST'});msg($('tm'),'已生成',1)}catch(e){msg($('tm'),e.message,0)}};
 $('bNft').onclick=async()=>{try{await api('/apply-nft',{method:'POST'});msg($('tm'),'nft 已应用',1)}catch(e){msg($('tm'),e.message,0)}};
