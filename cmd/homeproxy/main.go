@@ -101,6 +101,7 @@ func runServe(args []string) {
 	if err != nil {
 		fatal("load config: %v", err)
 	}
+	mgr.StartSubScheduler()
 	srv := web.New(mgr)
 	addr := web.ParseListen(listen)
 	fmt.Printf("homeproxy-go web UI on %s (config: %s)\n", addr, path)
@@ -225,6 +226,17 @@ func runGenerate(args []string) {
 		fatal("nftables: %v", err)
 	}
 	fmt.Println("wrote", nftPath)
+
+	if cfg.DNSMasq.Enabled {
+		path, n, err := generator.NewDNSMasq(cfg).WriteGFWConf()
+		if err != nil {
+			fatal("dnsmasq: %v", err)
+		}
+		fmt.Printf("wrote %s (%d domains)\n", path, n)
+		if cfg.DNSMasq.ReloadCmd != "" {
+			_ = exec.Command("sh", "-c", cfg.DNSMasq.ReloadCmd).Run()
+		}
+	}
 }
 
 func runApplyNft(args []string) {

@@ -2,6 +2,9 @@ package service
 
 import (
 	"fmt"
+	"encoding/json"
+	"io"
+	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -17,6 +20,7 @@ import (
 	"github.com/evecus/homeproxy-go/internal/subscription"
 )
 
+// Manager controls generate / nft / sing-box lifecycle.
 type Manager struct {
 	mu         sync.Mutex
 	ConfigPath string
@@ -118,6 +122,7 @@ func (m *Manager) Status() Status {
 func (m *Manager) pidFile() string {
 	return filepath.Join(m.Cfg.Paths.RunDir, "sing-box.pid")
 }
+
 func (m *Manager) readPID() int {
 	b, err := os.ReadFile(m.pidFile())
 	if err != nil {
@@ -126,10 +131,12 @@ func (m *Manager) readPID() int {
 	n, _ := strconv.Atoi(strings.TrimSpace(string(b)))
 	return n
 }
+
 func (m *Manager) writePID(pid int) error {
 	_ = os.MkdirAll(m.Cfg.Paths.RunDir, 0o755)
 	return os.WriteFile(m.pidFile(), []byte(strconv.Itoa(pid)+"\n"), 0o644)
 }
+
 func processAlive(pid int) bool {
 	if pid <= 0 {
 		return false
@@ -141,6 +148,7 @@ func processAlive(pid int) bool {
 	return p.Signal(syscall.Signal(0)) == nil
 }
 
+// Generate builds sing-box.json and nftables.nft (does not start proxy).
 func (m *Manager) Generate() error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -149,6 +157,7 @@ func (m *Manager) Generate() error {
 
 func (m *Manager) generateLocked() error {
 	cfg := m.Cfg
+	// merge subscriptions
 	for _, sub := range cfg.Subs {
 		if sub.URL == "" {
 			continue
@@ -169,6 +178,7 @@ func (m *Manager) generateLocked() error {
 	_ = rm.EnsureDir()
 	china4, _ := rm.LoadChinaIP4()
 	china6, _ := rm.LoadChinaIP6()
+
 	sbPath := filepath.Join(cfg.Paths.RunDir, "sing-box.json")
 	if err := generator.NewSingBox(cfg).Write(sbPath); err != nil {
 		return fmt.Errorf("sing-box: %w", err)
@@ -176,6 +186,18 @@ func (m *Manager) generateLocked() error {
 	nftPath := filepath.Join(cfg.Paths.RunDir, "nftables.nft")
 	if err := generator.NewNftables(cfg, china4, china6).Write(nftPath); err != nil {
 		return fmt.Errorf("nftables: %w", err)
+	}
+	// dnsmasq nftset fragment for GFW
+	if cfg.DNSMasq.Enabled {
+		path, n, err := generator.NewDNSMasq(cfg).WriteGFWConf()
+		if err != nil {
+			return fmt.Errorf("dnsmasq: %w", err)
+		}
+		_ = path
+		_ = n
+		if cfg.DNSMasq.ReloadCmd != "" {
+			_ = exec.Command("sh", "-c", cfg.DNSMasq.ReloadCmd).Run()
+		}
 	}
 	return nil
 }
@@ -187,7 +209,8 @@ func (m *Manager) ApplyNft() error {
 	if _, err := os.Stat(nftPath); err != nil {
 		return fmt.Errorf("missing %s — generate first", nftPath)
 	}
-	out, err := exec.Command("nft", "-f", nftPath).CombinedOutput()
+	cmd := exec.Command("nft", "-f", nftPath)
+	out, err := cmd.CombinedOutput()
 	if err != nil {
 		return fmt.Errorf("nft: %v: %s", err, string(out))
 	}
@@ -207,7 +230,16 @@ func (m *Manager) SetupRouting() error {
 	if err := mustIP("rule", "add", "fwmark", mark, "lookup", "100"); err != nil {
 		return err
 	}
-	return mustIP("route", "add", "local", "default", "dev", "lo", "table", "100")
+	if err := mustIP("route", "add", "local", "default", "dev", "lo", "table", "100"); err != nil {
+		return err
+	}
+	if cfg.Proxy.IPv6 {
+		runIP("-6", "rule", "del", "fwmark", mark, "lookup", "100")
+		runIP("-6", "route", "del", "local", "default", "dev", "lo", "table", "100")
+		_ = mustIP("-6", "rule", "add", "fwmark", mark, "lookup", "100")
+		_ = mustIP("-6", "route", "add", "local", "default", "dev", "lo", "table", "100")
+	}
+	return nil
 }
 
 func (m *Manager) UpdateResources() error {
@@ -216,6 +248,7 @@ func (m *Manager) UpdateResources() error {
 	return resources.NewManager(m.Cfg).UpdateAll()
 }
 
+// Start generates configs, applies nft/routing, starts sing-box.
 func (m *Manager) Start() error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -225,6 +258,7 @@ func (m *Manager) Start() error {
 	if err := m.generateLocked(); err != nil {
 		return err
 	}
+	// unlock-style: call helpers that need lock carefully — we're already locked
 	nftPath := filepath.Join(m.Cfg.Paths.RunDir, "nftables.nft")
 	if out, err := exec.Command("nft", "-f", nftPath).CombinedOutput(); err != nil {
 		return fmt.Errorf("nft: %v: %s", err, string(out))
@@ -236,17 +270,28 @@ func (m *Manager) Start() error {
 		_ = mustIP("rule", "add", "fwmark", mark, "lookup", "100")
 		_ = mustIP("route", "add", "local", "default", "dev", "lo", "table", "100")
 	}
+
 	sbPath := filepath.Join(m.Cfg.Paths.RunDir, "sing-box.json")
-	cmd := exec.Command(m.Cfg.Paths.SingBoxBin, "run", "-c", sbPath)
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
+	bin := m.Cfg.Paths.SingBoxBin
+	cmd := exec.Command(bin, "run", "-c", sbPath)
+	logPath := filepath.Join(m.Cfg.Paths.RunDir, "sing-box.log")
+	if logf, err := os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644); err == nil {
+		cmd.Stdout = logf
+		cmd.Stderr = logf
+	} else {
+		cmd.Stdout = os.Stdout
+		cmd.Stderr = os.Stderr
+	}
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 	if err := cmd.Start(); err != nil {
 		return fmt.Errorf("start sing-box: %w", err)
 	}
 	m.cmd = cmd
 	_ = m.writePID(cmd.Process.Pid)
-	go func() { _ = cmd.Wait(); _ = os.Remove(m.pidFile()) }()
+	go func() {
+		_ = cmd.Wait()
+		_ = os.Remove(m.pidFile())
+	}()
 	time.Sleep(200 * time.Millisecond)
 	if !processAlive(cmd.Process.Pid) {
 		return fmt.Errorf("sing-box exited immediately")
@@ -254,9 +299,11 @@ func (m *Manager) Start() error {
 	return nil
 }
 
+// Stop kills sing-box and optionally flushes homeproxy nft table.
 func (m *Manager) Stop(flushNft bool) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	var errs []string
 	pid := m.readPID()
 	if pid <= 0 && m.cmd != nil && m.cmd.Process != nil {
 		pid = m.cmd.Process.Pid
@@ -272,18 +319,30 @@ func (m *Manager) Stop(flushNft bool) error {
 	_ = os.Remove(m.pidFile())
 	m.cmd = nil
 	if flushNft {
-		_ = exec.Command("nft", "delete", "table", "inet", "homeproxy").Run()
+		if out, err := exec.Command("nft", "delete", "table", "inet", "homeproxy").CombinedOutput(); err != nil {
+			// table may not exist
+			if !strings.Contains(string(out), "No such file") && !strings.Contains(string(out), "does not exist") {
+				errs = append(errs, string(out))
+			}
+		}
+	}
+	if len(errs) > 0 {
+		return fmt.Errorf("%s", strings.Join(errs, "; "))
 	}
 	return nil
 }
 
+// Restart stops then starts.
 func (m *Manager) Restart() error {
 	_ = m.Stop(false)
 	time.Sleep(300 * time.Millisecond)
 	return m.Start()
 }
 
-func runIP(args ...string) { _ = exec.Command("ip", args...).Run() }
+func runIP(args ...string) {
+	_ = exec.Command("ip", args...).Run()
+}
+
 func mustIP(args ...string) error {
 	out, err := exec.Command("ip", args...).CombinedOutput()
 	if err != nil {
@@ -292,6 +351,7 @@ func mustIP(args ...string) error {
 	return nil
 }
 
+// SetMainNode updates main_node and saves config.
 func (m *Manager) SetMainNode(name string) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -299,6 +359,7 @@ func (m *Manager) SetMainNode(name string) error {
 	return m.Cfg.Save(m.ConfigPath)
 }
 
+// DeleteNode removes a node by name.
 func (m *Manager) DeleteNode(name string) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -318,6 +379,7 @@ func (m *Manager) DeleteNode(name string) error {
 	return m.Cfg.Save(m.ConfigPath)
 }
 
+// AddSubscription appends a subscription entry.
 func (m *Manager) AddSubscription(sub config.Subscription) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -329,11 +391,14 @@ func (m *Manager) AddSubscription(sub config.Subscription) error {
 			return fmt.Errorf("subscription %q already exists", sub.Name)
 		}
 	}
-	sub.Enabled = true
+	if !sub.Enabled {
+		sub.Enabled = true
+	}
 	m.Cfg.Subs = append(m.Cfg.Subs, sub)
 	return m.Cfg.Save(m.ConfigPath)
 }
 
+// RemoveSubscription deletes subscription by name.
 func (m *Manager) RemoveSubscription(name string) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -347,6 +412,8 @@ func (m *Manager) RemoveSubscription(name string) error {
 	return m.Cfg.Save(m.ConfigPath)
 }
 
+// UpdateSubscription fetches one or all subscriptions and merges nodes.
+// replace=true removes previous nodes with prefix name/
 func (m *Manager) UpdateSubscription(name string, replace bool) (int, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -380,4 +447,198 @@ func (m *Manager) UpdateSubscription(name string, replace bool) (int, error) {
 		return total, err
 	}
 	return total, nil
+}
+
+
+// StartSubScheduler runs background subscription refresh based on UpdateInterval.
+// Call once from serve; stops when process exits.
+func (m *Manager) StartSubScheduler() {
+	go func() {
+		for {
+			m.mu.Lock()
+			subs := append([]config.Subscription(nil), m.Cfg.Subs...)
+			m.mu.Unlock()
+			minWait := 6 * time.Hour
+			for _, sub := range subs {
+				if !sub.Enabled || sub.URL == "" {
+					continue
+				}
+				d := parseDurationDefault(sub.UpdateInterval, 6*time.Hour)
+				if d < minWait {
+					minWait = d
+				}
+			}
+			time.Sleep(minWait)
+			m.mu.Lock()
+			subs = append([]config.Subscription(nil), m.Cfg.Subs...)
+			m.mu.Unlock()
+			for _, sub := range subs {
+				if !sub.Enabled || sub.URL == "" {
+					continue
+				}
+				_, _ = m.UpdateSubscription(sub.Name, true)
+			}
+		}
+	}()
+}
+
+func parseDurationDefault(s string, def time.Duration) time.Duration {
+	if s == "" {
+		return def
+	}
+	d, err := time.ParseDuration(s)
+	if err != nil || d <= 0 {
+		return def
+	}
+	return d
+}
+
+// ClashTraffic fetches connection totals from sing-box clash API.
+func (m *Manager) ClashTraffic() (map[string]any, error) {
+	m.mu.Lock()
+	cfg := m.Cfg
+	m.mu.Unlock()
+	if !cfg.Clash.Enabled {
+		return nil, fmt.Errorf("clash api disabled")
+	}
+	base := "http://" + cfg.Clash.Listen
+	req, err := http.NewRequest(http.MethodGet, base+"/connections", nil)
+	if err != nil {
+		return nil, err
+	}
+	if cfg.Clash.Secret != "" {
+		req.Header.Set("Authorization", "Bearer "+cfg.Clash.Secret)
+	}
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	body, _ := io.ReadAll(resp.Body)
+	var raw map[string]any
+	if err := json.Unmarshal(body, &raw); err != nil {
+		return map[string]any{"raw": string(body)}, nil
+	}
+	// also proxies
+	req2, _ := http.NewRequest(http.MethodGet, base+"/proxies", nil)
+	if cfg.Clash.Secret != "" {
+		req2.Header.Set("Authorization", "Bearer "+cfg.Clash.Secret)
+	}
+	if resp2, err := http.DefaultClient.Do(req2); err == nil {
+		defer resp2.Body.Close()
+		b2, _ := io.ReadAll(resp2.Body)
+		var proxies any
+		_ = json.Unmarshal(b2, &proxies)
+		raw["proxies"] = proxies
+	}
+	return raw, nil
+}
+
+
+// ProxyDelay tests a proxy via Clash API GET /proxies/{name}/delay
+func (m *Manager) ProxyDelay(name string, url string, timeoutMs int) (map[string]any, error) {
+	m.mu.Lock()
+	cfg := m.Cfg
+	m.mu.Unlock()
+	if !cfg.Clash.Enabled {
+		return nil, fmt.Errorf("clash api disabled — enable clash.enabled")
+	}
+	if url == "" {
+		url = "https://www.gstatic.com/generate_204"
+	}
+	if timeoutMs <= 0 {
+		timeoutMs = 5000
+	}
+	// Clash uses selector/urltest group names or node display names — we use node tags as outbound tags
+	// sing-box clash API exposes outbounds by tag without "node-" sometimes; try both
+	base := "http://" + cfg.Clash.Listen
+	candidates := []string{name, "node-" + sanitizeProxyName(name)}
+	var lastErr error
+	for _, n := range candidates {
+		u := fmt.Sprintf("%s/proxies/%s/delay?timeout=%d&url=%s", base, pathEscape(n), timeoutMs, pathEscape(url))
+		req, err := http.NewRequest(http.MethodGet, u, nil)
+		if err != nil {
+			lastErr = err
+			continue
+		}
+		if cfg.Clash.Secret != "" {
+			req.Header.Set("Authorization", "Bearer "+cfg.Clash.Secret)
+		}
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			lastErr = err
+			continue
+		}
+		body, _ := io.ReadAll(resp.Body)
+		resp.Body.Close()
+		var out map[string]any
+		if err := json.Unmarshal(body, &out); err != nil {
+			lastErr = fmt.Errorf("%s", string(body))
+			continue
+		}
+		out["name"] = n
+		return out, nil
+	}
+	if lastErr != nil {
+		return nil, lastErr
+	}
+	return nil, fmt.Errorf("delay test failed")
+}
+
+func sanitizeProxyName(s string) string {
+	s = strings.ReplaceAll(s, " ", "_")
+	return s
+}
+
+func pathEscape(s string) string {
+	return strings.ReplaceAll(strings.ReplaceAll(s, " ", "%20"), "/", "%2F")
+}
+
+// TailLog returns last lines of sing-box stdout log file if configured, else empty.
+func (m *Manager) TailLog(maxLines int) (string, error) {
+	m.mu.Lock()
+	cfg := m.Cfg
+	m.mu.Unlock()
+	if maxLines <= 0 {
+		maxLines = 200
+	}
+	logPath := filepath.Join(cfg.Paths.RunDir, "sing-box.log")
+	data, err := os.ReadFile(logPath)
+	if err != nil {
+		return "", fmt.Errorf("no log file at %s (redirect sing-box stdout there for logs)", logPath)
+	}
+	lines := strings.Split(string(data), "\n")
+	if len(lines) > maxLines {
+		lines = lines[len(lines)-maxLines:]
+	}
+	return strings.Join(lines, "\n"), nil
+}
+
+// ListProxies returns clash /proxies payload.
+func (m *Manager) ListProxies() (map[string]any, error) {
+	m.mu.Lock()
+	cfg := m.Cfg
+	m.mu.Unlock()
+	if !cfg.Clash.Enabled {
+		return nil, fmt.Errorf("clash api disabled")
+	}
+	base := "http://" + cfg.Clash.Listen
+	req, err := http.NewRequest(http.MethodGet, base+"/proxies", nil)
+	if err != nil {
+		return nil, err
+	}
+	if cfg.Clash.Secret != "" {
+		req.Header.Set("Authorization", "Bearer "+cfg.Clash.Secret)
+	}
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	body, _ := io.ReadAll(resp.Body)
+	var out map[string]any
+	if err := json.Unmarshal(body, &out); err != nil {
+		return nil, err
+	}
+	return out, nil
 }

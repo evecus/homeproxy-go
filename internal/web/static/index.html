@@ -39,10 +39,13 @@ table{width:100%;border-collapse:collapse;font-size:.85rem}th,td{text-align:left
 <div class="tabs">
 <button type="button" class="active" data-t="ov">概览</button>
 <button type="button" data-t="client">客户端</button>
+<button type="button" data-t="dnsp">DNS</button>
 <button type="button" data-t="nodes">节点</button>
 <button type="button" data-t="subs">订阅</button>
 <button type="button" data-t="rules">路由规则</button>
 <button type="button" data-t="acl">访问控制</button>
+<button type="button" data-t="server">入站服务</button>
+<button type="button" data-t="traffic">流量</button>
 <button type="button" data-t="tools">工具</button>
 </div>
 
@@ -54,7 +57,11 @@ table{width:100%;border-collapse:collapse;font-size:.85rem}th,td{text-align:left
 <button type="button" class="er" id="bStop">停用</button>
 <button type="button" class="sec" id="bRestart">重启</button>
 <button type="button" class="sec" id="bRef">刷新</button>
-</div><div class="msg" id="om"></div></div>
+</div><div class="row" style="margin-top:.5rem">
+<button type="button" class="sec sm" id="bLogs">刷新日志</button>
+</div>
+<pre id="logpre" style="max-height:140px;overflow:auto;font-size:.7rem;background:#0d1219;padding:.5rem;border-radius:6px;margin-top:.4rem"></pre>
+<div class="msg" id="om"></div></div>
 <div class="card"><h2>当前</h2>
 <p>路由模式 <b id="sm">—</b></p>
 <p>透明代理 <b id="sp">—</b></p>
@@ -63,6 +70,32 @@ table{width:100%;border-collapse:collapse;font-size:.85rem}th,td{text-align:left
 <p>节点 <b id="snodes">0</b> · 订阅 <b id="ssubs">0</b> · 规则 <b id="srules">0</b></p>
 <p>资源: IP4 <b id="sip4">—</b> IP6 <b id="sip6">—</b> GFW <b id="sgfw">—</b></p>
 <p class="hint" id="spath"></p></div>
+</div></div>
+
+
+<div id="dnsp" class="panel">
+<div class="card"><h2>DNS 服务器</h2>
+<label>远程 DNS（可 udp:// / tls:// / https://）</label><input id="dnsMain" placeholder="8.8.8.8 或 https://1.1.1.1/dns-query"/>
+<label>国内 DNS</label><input id="dnsChina" placeholder="223.5.5.5"/>
+<label>策略</label>
+<select id="dnsStrat"><option>prefer_ipv4</option><option>ipv4_only</option><option>prefer_ipv6</option><option>ipv6_only</option></select>
+<label>FakeIP</label><select id="dnsFake"><option value="0">关闭</option><option value="1">开启</option></select>
+<button type="button" id="bSaveDNS">保存 DNS 基础设置</button>
+<div class="msg" id="dmsg"></div>
+</div>
+<div class="card"><h2>DNS 规则</h2>
+<p class="hint">按域名将查询交给指定 server tag（如 china-dns / main-dns / 自定义 extra）</p>
+<table><thead><tr><th>名称</th><th>Server</th><th>匹配</th><th></th></tr></thead><tbody id="drt"></tbody></table>
+<label>规则名</label><input id="drname"/>
+<label>Server tag</label><input id="drsrv" placeholder="china-dns"/>
+<label>域名后缀（每行）</label><textarea id="drsuf"></textarea>
+<label>rule_set（如 geosite-cn）</label><input id="drrs"/>
+<button type="button" id="bAddDR">添加 DNS 规则</button>
+</div>
+<div class="card"><h2>额外 DNS 服务器</h2>
+<label>tag,address,detour 每行一个（例: mydns,tls://8.8.8.8,direct-out）</label>
+<textarea id="dextra"></textarea>
+<button type="button" id="bSaveExtra">保存额外服务器</button>
 </div></div>
 
 <div id="client" class="panel">
@@ -115,7 +148,7 @@ table{width:100%;border-collapse:collapse;font-size:.85rem}th,td{text-align:left
 <div>
 <label>名称</label><input id="nn"/>
 <label>类型</label>
-<select id="ntype"><option>shadowsocks</option><option>vmess</option><option>vless</option><option>trojan</option><option>hysteria2</option></select>
+<select id="ntype"><option>shadowsocks</option><option>vmess</option><option>vless</option><option>trojan</option><option>hysteria2</option><option>tuic</option><option>wireguard</option></select>
 <label>服务器</label><input id="ns"/>
 <label>端口</label><input id="np" type="number"/>
 </div>
@@ -123,8 +156,27 @@ table{width:100%;border-collapse:collapse;font-size:.85rem}th,td{text-align:left
 <label>密码 / UUID</label><input id="nsec"/>
 <label>SS 加密</label><input id="nm" placeholder="aes-128-gcm"/>
 <label>TLS SNI</label><input id="nsni"/>
+<label>uTLS 指纹</label>
+<select id="nutls"><option value="">—</option><option>chrome</option><option>firefox</option><option>safari</option><option>ios</option><option>android</option><option>edge</option><option>random</option></select>
 </div>
 </div>
+<details style="margin:.5rem 0"><summary class="hint">高级：传输层 / Reality / Flow</summary>
+<div class="grid2">
+<div>
+<label>传输类型</label>
+<select id="ntr"><option value="">无</option><option>ws</option><option>grpc</option><option>http</option><option>httpupgrade</option></select>
+<label>WS/HTTP Path</label><input id="npath"/>
+<label>WS/HTTP Host</label><input id="nhost"/>
+<label>gRPC service</label><input id="ngrpc"/>
+</div>
+<div>
+<label>VLESS Flow</label><input id="nflow" placeholder="xtls-rprx-vision"/>
+<label>Reality 公钥</label><input id="nrealpub"/>
+<label>Reality short_id</label><input id="nrealid"/>
+<label>启用 Reality</label><select id="nrealen"><option value="0">否</option><option value="1">是</option></select>
+</div>
+</div>
+</details>
 <button type="button" id="bAdd">添加并保存</button>
 </div></div>
 
@@ -209,12 +261,49 @@ table{width:100%;border-collapse:collapse;font-size:.85rem}th,td{text-align:left
 <div class="msg" id="am"></div>
 </div></div>
 
+
+<div id="server" class="panel">
+<div class="card"><h2>入站服务（本机开代理给客户端连）</h2>
+<p class="hint">写入 sing-box inbounds。启用后保存并重启代理生效。</p>
+<table><thead><tr><th>名称</th><th>类型</th><th>端口</th><th>启用</th><th></th></tr></thead>
+<tbody id="svt"></tbody></table>
+<div class="msg" id="svmsg"></div>
+</div>
+<div class="card"><h2>添加入站</h2>
+<div class="grid2">
+<div>
+<label>名称</label><input id="svname"/>
+<label>类型</label>
+<select id="svtype"><option>mixed</option><option>socks</option><option>http</option><option>shadowsocks</option><option>vmess</option><option>trojan</option></select>
+<label>端口</label><input id="svport" type="number" value="1080"/>
+</div>
+<div>
+<label>密码 / UUID</label><input id="svpass"/>
+<label>SS 加密</label><input id="svmethod" value="aes-128-gcm"/>
+<label>监听</label><input id="svlisten" value="::"/>
+<label>TLS 证书路径</label><input id="svcert" placeholder="/etc/ssl/cert.pem"/>
+<label>TLS 密钥路径</label><input id="svkey" placeholder="/etc/ssl/key.pem"/>
+<label>TLS SNI</label><input id="svsni"/>
+</div>
+</div>
+<button type="button" id="bAddSrv">添加入站</button>
+</div></div>
+
+<div id="traffic" class="panel">
+<div class="card"><h2>Clash API 流量 / 连接</h2>
+<p class="hint">需在配置启用 clash.enabled，并已启动代理。</p>
+<button type="button" class="sec" id="bTraffic">刷新流量</button>
+<pre id="tpre" style="max-height:360px;overflow:auto;font-size:.75rem;background:#0d1219;padding:.6rem;border-radius:8px"></pre>
+<div class="msg" id="tmsg"></div>
+</div></div>
+
 <div id="tools" class="panel">
 <div class="card"><h2>运维</h2>
 <div class="row">
 <button type="button" class="sec" id="bGen">生成配置</button>
 <button type="button" class="sec" id="bNft">应用 nft</button>
 <button type="button" class="sec" id="bRes">更新中国 IP / GFW 列表</button>
+<button type="button" class="sec" id="bDnsGfw">生成 dnsmasq GFW conf</button>
 </div>
 <div class="msg" id="tm"></div>
 <h2 style="margin-top:1rem">原始 YAML</h2>
@@ -292,6 +381,29 @@ function fill(c){
     td.appendChild(bd); rt.appendChild(tr);
   }); }
 
+  const svt=$('svt'); if(svt){ svt.innerHTML=''; (c.servers||[]).forEach((s,i)=>{
+    const tr=document.createElement('tr');
+    tr.innerHTML=`<td>${s.name||''}</td><td>${s.type||''}</td><td>${s.port||''}</td><td>${s.enabled?'是':'否'}</td><td></td>`;
+    const td=tr.lastChild;
+    const bd=document.createElement('button'); bd.type='button'; bd.className='sm er'; bd.textContent='删除';
+    bd.onclick=async()=>{ const c2=baseClient(); c2.servers=(c2.servers||[]).filter((_,j)=>j!==i); try{ await api('/config',{method:'PUT',body:JSON.stringify(c2)}); await loadCfg(); msg($('svmsg'),'已删除',1);}catch(e){msg($('svmsg'),e.message,0)} };
+    td.appendChild(bd); svt.appendChild(tr);
+  }); }
+  if($('dnsMain')&&c.dns){
+    $('dnsMain').value=c.dns.server||''; $('dnsChina').value=c.dns.china_server||'';
+    if($('dnsStrat'))$('dnsStrat').value=c.dns.strategy||'prefer_ipv4';
+    if($('dnsFake'))$('dnsFake').value=c.dns.fakeip?'1':'0';
+    if($('dextra'))$('dextra').value=(c.dns.extra_servers||[]).map(s=>[s.tag,s.address,s.detour||''].join(',')).join('\n');
+    const drt=$('drt'); if(drt){ drt.innerHTML=''; (c.dns.rules||[]).forEach((r,i)=>{
+      const tr=document.createElement('tr');
+      const m=[...(r.domain_suffix||[]),...(r.domain||[]),r.rule_set||''].filter(Boolean).slice(0,2).join(',')||'—';
+      tr.innerHTML=`<td>${r.name||i}</td><td>${r.server||''}</td><td>${m}</td><td></td>`;
+      const bd=document.createElement('button'); bd.type='button'; bd.className='sm er'; bd.textContent='删';
+      bd.onclick=async()=>{const c2=baseClient();c2.dns=c2.dns||{};c2.dns.rules=(c2.dns.rules||[]).filter((_,j)=>j!==i);
+        try{await api('/config',{method:'PUT',body:JSON.stringify(c2)});await loadCfg()}catch(e){msg($('dmsg'),e.message,0)}};
+      tr.lastChild.appendChild(bd); drt.appendChild(tr);
+    });}
+  }
   const ctl=c.control||{};
   $('lpm').value=ctl.lan_proxy_mode||'all';
   $('lanD4').value=join(ctl.lan_direct_ipv4);
@@ -330,13 +442,37 @@ $('bRestart').onclick=async()=>{try{msg($('om'),'重启中…',1);await api('/re
 
 $('bSaveClient').onclick=async()=>{try{await api('/config',{method:'PUT',body:JSON.stringify(baseClient())});msg($('cm'),'已保存',1);await loadCfg();await refresh()}catch(e){msg($('cm'),e.message,0)}};
 
-$('bAdd').onclick=async()=>{try{const c=baseClient();c.nodes=c.nodes||[];const t=$('ntype').value;const n={name:$('nn').value.trim(),type:t,server:$('ns').value.trim(),port:+$('np').value||0};if(!n.name||!n.server)throw new Error('名称和服务器必填');const s=$('nsec').value.trim();if(t==='shadowsocks'){n.password=s;n.method=$('nm').value.trim()||'aes-128-gcm'}else if(t==='vmess'||t==='vless')n.uuid=s;else n.password=s;const sni=$('nsni').value.trim();if(sni)n.tls={enabled:true,server_name:sni};c.nodes.push(n);if(!c.proxy.main_node)c.proxy.main_node=n.name;await api('/config',{method:'PUT',body:JSON.stringify(c)});msg($('nmmsg'),'已添加',1);await loadCfg()}catch(e){msg($('nmmsg'),e.message,0)}};
+$('bAdd').onclick=async()=>{try{const c=baseClient();c.nodes=c.nodes||[];const t=$('ntype').value;const n={name:$('nn').value.trim(),type:t,server:$('ns').value.trim(),port:+$('np').value||0};if(!n.name||!n.server)throw new Error('名称和服务器必填');const s=$('nsec').value.trim();if(t==='shadowsocks'){n.password=s;n.method=$('nm').value.trim()||'aes-128-gcm'}else if(t==='vmess'||t==='vless')n.uuid=s;else n.password=s;const sni=$('nsni').value.trim();const utls=$('nutls')?$('nutls').value:'';
+if(sni||utls||($('nrealen')&&$('nrealen').value==='1')){n.tls={enabled:true,server_name:sni||undefined,utls:utls||undefined};
+if($('nrealen')&&$('nrealen').value==='1'){n.tls.reality_enabled=true;n.tls.reality_public_key=$('nrealpub').value.trim();n.tls.reality_short_id=$('nrealid').value.trim()}}
+if($('ntr')&&$('ntr').value){n.transport_type=$('ntr').value;n.ws_path=$('npath').value.trim();n.ws_host=$('nhost').value.trim();n.grpc_service=$('ngrpc').value.trim();n.http_path=$('npath').value.trim();n.http_host=$('nhost').value.trim()}
+if($('nflow')&&$('nflow').value.trim())n.flow=$('nflow').value.trim();c.nodes.push(n);if(!c.proxy.main_node)c.proxy.main_node=n.name;await api('/config',{method:'PUT',body:JSON.stringify(c)});msg($('nmmsg'),'已添加',1);await loadCfg()}catch(e){msg($('nmmsg'),e.message,0)}};
 
 $('bAddSub').onclick=async()=>{try{await api('/subscriptions',{method:'POST',body:JSON.stringify({name:$('subName').value.trim(),url:$('subURL').value.trim(),enabled:true})});msg($('submsg'),'订阅已添加，请点「更新」拉取节点',1);$('subName').value='';$('subURL').value='';await loadCfg()}catch(e){msg($('submsg'),e.message,0)}};
 $('bUpAll').onclick=async()=>{try{msg($('submsg'),'更新全部…',1);const r=await api('/subscriptions/update',{method:'POST',body:JSON.stringify({name:'',replace:true})});msg($('submsg'),'完成，节点变化 '+r.nodes_added,1);await loadCfg()}catch(e){msg($('submsg'),e.message,0)}};
 
 $('bAddRule')&&($('bAddRule').onclick=async()=>{try{const c=baseClient();c.rules=c.rules||[];const ports=($('rport').value||'').split(',').map(s=>s.trim()).filter(Boolean).map(Number).filter(n=>n>0);c.rules.push({name:$('rname').value.trim()||'rule',enabled:true,outbound:$('rout').value,domain:lines($('rdom').value),domain_suffix:lines($('rsuf').value),ip_cidr:lines($('rip').value),source_ip_cidr:lines($('rsip').value),port:ports,network:$('rnet').value});await api('/config',{method:'PUT',body:JSON.stringify(c)});msg($('rmsg'),'已添加',1);await loadCfg();}catch(e){msg($('rmsg'),e.message,0)}});
 $('bSaveACL').onclick=async()=>{try{const c=baseClient();c.control=c.control||{};c.control.lan_proxy_mode=$('lpm').value;c.control.lan_direct_ipv4=lines($('lanD4').value);c.control.lan_direct_mac=lines($('lanDM').value);c.control.lan_proxy_ipv4=lines($('lanP4').value);c.control.lan_proxy_mac=lines($('lanPM').value);c.control.proxy_domains=lines($('domP').value);c.control.direct_domains=lines($('domD').value);c.control.wan_direct_ipv4=lines($('wanD4').value);c.control.wan_proxy_ipv4=lines($('wanP4').value);await api('/config',{method:'PUT',body:JSON.stringify(c)});msg($('am'),'访问控制已保存（重启代理后生效）',1);await loadCfg()}catch(e){msg($('am'),e.message,0)}};
+
+$('bAddSrv')&&($('bAddSrv').onclick=async()=>{try{const c=baseClient();c.servers=c.servers||[];
+  const t=$('svtype').value; const s={name:$('svname').value.trim()||t,type:t,port:+$('svport').value||1080,listen:$('svlisten').value||'::',enabled:true};
+  if(t==='shadowsocks'){s.password=$('svpass').value;s.method=$('svmethod').value||'aes-128-gcm';}
+  else if(t==='vmess'||t==='vless'){s.users=[{uuid:$('svpass').value,name:'u1'}];}
+  else if(t==='trojan'){s.password=$('svpass').value;}
+  else if(t==='mixed'||t==='socks'||t==='http'){ if($('svpass').value) s.users=[{name:'user',password:$('svpass').value}]; }
+  if($('svcert')&&$('svcert').value.trim()){s.tls={enabled:true,certificate_path:$('svcert').value.trim(),key_path:$('svkey').value.trim(),server_name:$('svsni').value.trim()};}
+  c.servers.push(s); await api('/config',{method:'PUT',body:JSON.stringify(c)}); msg($('svmsg'),'已添加，请重启代理',1); await loadCfg();}catch(e){msg($('svmsg'),e.message,0)}});
+$('bTraffic')&&($('bTraffic').onclick=async()=>{try{const d=await api('/traffic'); $('tpre').textContent=JSON.stringify(d,null,2); msg($('tmsg'),'已刷新',1);}catch(e){msg($('tmsg'),e.message,0);$('tpre').textContent='';}});
+$('bDnsGfw')&&($('bDnsGfw').onclick=async()=>{try{await api('/dnsmasq-gfw',{method:'POST'});msg($('tm'),'已生成 dnsmasq GFW conf',1);}catch(e){msg($('tm'),e.message,0)}});
+
+$('bLogs')&&($('bLogs').onclick=async()=>{try{const d=await api('/logs');$('logpre').textContent=d.log||d.hint||'';}catch(e){$('logpre').textContent=e.message}});
+$('bSaveDNS')&&($('bSaveDNS').onclick=async()=>{try{const c=baseClient();c.dns=c.dns||{};c.dns.server=$('dnsMain').value.trim();c.dns.china_server=$('dnsChina').value.trim();c.dns.strategy=$('dnsStrat').value;c.dns.fakeip=$('dnsFake').value==='1';
+await api('/config',{method:'PUT',body:JSON.stringify(c)});msg($('dmsg'),'已保存',1);await loadCfg()}catch(e){msg($('dmsg'),e.message,0)}});
+$('bSaveExtra')&&($('bSaveExtra').onclick=async()=>{try{const c=baseClient();c.dns=c.dns||{};c.dns.extra_servers=($('dextra').value||'').split('\n').map(l=>l.trim()).filter(Boolean).map(l=>{const p=l.split(',');return{tag:(p[0]||'').trim(),address:(p[1]||'').trim(),detour:(p[2]||'direct-out').trim()}}).filter(x=>x.tag&&x.address);
+await api('/config',{method:'PUT',body:JSON.stringify(c)});msg($('dmsg'),'额外 DNS 已保存',1);await loadCfg()}catch(e){msg($('dmsg'),e.message,0)}});
+$('bAddDR')&&($('bAddDR').onclick=async()=>{try{const c=baseClient();c.dns=c.dns||{};c.dns.rules=c.dns.rules||[];
+c.dns.rules.push({name:$('drname').value.trim()||'rule',enabled:true,server:$('drsrv').value.trim(),domain_suffix:lines($('drsuf').value),rule_set:$('drrs').value.trim()});
+await api('/config',{method:'PUT',body:JSON.stringify(c)});msg($('dmsg'),'DNS 规则已添加',1);await loadCfg()}catch(e){msg($('dmsg'),e.message,0)}});
 
 $('bGen').onclick=async()=>{try{await api('/generate',{method:'POST'});msg($('tm'),'已生成',1)}catch(e){msg($('tm'),e.message,0)}};
 $('bNft').onclick=async()=>{try{await api('/apply-nft',{method:'POST'});msg($('tm'),'nft 已应用',1)}catch(e){msg($('tm'),e.message,0)}};

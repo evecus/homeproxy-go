@@ -44,13 +44,25 @@ func (s *SingBox) Generate() (map[string]any, error) {
 	// Route
 	out["route"] = s.buildRoute()
 
-	// Experimental cache (useful for geosite)
-	out["experimental"] = map[string]any{
+	exp := map[string]any{
 		"cache_file": map[string]any{
 			"enabled": true,
 			"path":    filepath.Join(cfg.Paths.RunDir, "cache.db"),
 		},
 	}
+	if cfg.Clash.Enabled {
+		clash := map[string]any{
+			"external_controller": cfg.Clash.Listen,
+		}
+		if cfg.Clash.Secret != "" {
+			clash["secret"] = cfg.Clash.Secret
+		}
+		if cfg.Clash.StoreSel {
+			clash["store_selected"] = true
+		}
+		exp["clash_api"] = clash
+	}
+	out["experimental"] = exp
 
 	return out, nil
 }
@@ -137,10 +149,31 @@ func (s *SingBox) buildDNS() map[string]any {
 		final = "main-dns"
 	}
 
+	// User DNS rules
+	for _, dr := range cfg.DNS.Rules {
+		if !dr.Enabled || dr.Server == "" {
+			continue
+		}
+		r := map[string]any{"server": dr.Server}
+		if len(dr.Domain) > 0 {
+			r["domain"] = dr.Domain
+		}
+		if len(dr.DomainSuffix) > 0 {
+			r["domain_suffix"] = dr.DomainSuffix
+		}
+		if len(dr.DomainKeyword) > 0 {
+			r["domain_keyword"] = dr.DomainKeyword
+		}
+		if dr.RuleSet != "" {
+			r["rule_set"] = dr.RuleSet
+		}
+		rules = append(rules, r)
+	}
+
 	dns := map[string]any{
-		"servers": servers,
-		"rules":   rules,
-		"final":   final,
+		"servers":  servers,
+		"rules":    rules,
+		"final":    final,
 		"strategy": cfg.DNS.Strategy,
 	}
 	if cfg.DNS.FakeIP {
@@ -209,6 +242,86 @@ func (s *SingBox) buildInbounds() []any {
 			"sniff":                     true,
 			"sniff_override_destination": true,
 		})
+	}
+
+	// Server-side inbounds (homeproxy server)
+	for _, srv := range cfg.Servers {
+		if !srv.Enabled || srv.Port <= 0 {
+			continue
+		}
+		listen := srv.Listen
+		if listen == "" {
+			listen = "::"
+		}
+		tag := "server-" + sanitizeTag(srv.Name)
+		if srv.Name == "" {
+			tag = fmt.Sprintf("server-%s-%d", srv.Type, srv.Port)
+		}
+		ib := map[string]any{
+			"type":        srv.Type,
+			"tag":         tag,
+			"listen":      listen,
+			"listen_port": srv.Port,
+		}
+		switch srv.Type {
+		case "shadowsocks":
+			ib["method"] = srv.Method
+			if srv.Method == "" {
+				ib["method"] = "aes-128-gcm"
+			}
+			ib["password"] = srv.Password
+		case "mixed", "socks", "http":
+			if len(srv.Users) > 0 {
+				users := []any{}
+				for _, u := range srv.Users {
+					users = append(users, map[string]any{
+						"username": u.Name,
+						"password": u.Password,
+					})
+				}
+				ib["users"] = users
+			}
+		case "vmess", "vless", "trojan":
+			users := []any{}
+			for _, u := range srv.Users {
+				um := map[string]any{}
+				if u.UUID != "" {
+					um["uuid"] = u.UUID
+				}
+				if u.Name != "" {
+					um["name"] = u.Name
+				}
+				if u.Password != "" {
+					um["password"] = u.Password
+				}
+				users = append(users, um)
+			}
+			if len(users) > 0 {
+				ib["users"] = users
+			}
+			if srv.Password != "" && srv.Type == "trojan" {
+				ib["users"] = []any{map[string]any{"name": "user", "password": srv.Password}}
+			}
+		}
+		if srv.TLS != nil && srv.TLS.Enabled {
+			tls := map[string]any{"enabled": true}
+			if srv.TLS.ServerName != "" {
+				tls["server_name"] = srv.TLS.ServerName
+			}
+			if srv.TLS.CertificatePath != "" {
+				tls["certificate_path"] = srv.TLS.CertificatePath
+			}
+			if srv.TLS.KeyPath != "" {
+				tls["key_path"] = srv.TLS.KeyPath
+			}
+			ib["tls"] = tls
+		}
+		if srv.Extra != nil {
+			for k, v := range srv.Extra {
+				ib[k] = v
+			}
+		}
+		inbounds = append(inbounds, ib)
 	}
 	return inbounds
 }
@@ -485,8 +598,19 @@ func nodeToOutbound(n *config.Node, selfMark string) (map[string]any, error) {
 	case "shadowsocks":
 		ob["method"] = n.Method
 		ob["password"] = n.Password
-	case "vmess", "vless":
+	case "vmess":
 		ob["uuid"] = n.UUID
+		if n.AlterID > 0 {
+			ob["alter_id"] = n.AlterID
+		}
+		if n.Network != "" {
+			ob["network"] = n.Network
+		}
+	case "vless":
+		ob["uuid"] = n.UUID
+		if n.Flow != "" {
+			ob["flow"] = n.Flow
+		}
 		if n.Network != "" {
 			ob["network"] = n.Network
 		}
@@ -497,14 +621,39 @@ func nodeToOutbound(n *config.Node, selfMark string) (map[string]any, error) {
 	case "tuic":
 		ob["uuid"] = n.UUID
 		ob["password"] = n.Password
+	case "wireguard":
+		// fields via Extra: private_key, peer_public_key, local_address, ...
 	default:
-		// allow unknown types via Extra
+	}
+
+	// Structured transport → sing-box transport object
+	if n.TransportType != "" {
+		tr := map[string]any{"type": n.TransportType}
+		switch n.TransportType {
+		case "ws":
+			if n.WSPath != "" {
+				tr["path"] = n.WSPath
+			}
+			if n.WSHost != "" {
+				tr["headers"] = map[string]any{"Host": n.WSHost}
+			}
+		case "grpc":
+			if n.GRPCService != "" {
+				tr["service_name"] = n.GRPCService
+			}
+		case "http", "httpupgrade":
+			if n.HTTPPath != "" {
+				tr["path"] = n.HTTPPath
+			}
+			if n.HTTPHost != "" {
+				tr["host"] = []string{n.HTTPHost}
+			}
+		}
+		ob["transport"] = tr
 	}
 
 	if n.TLS != nil && n.TLS.Enabled {
-		tls := map[string]any{
-			"enabled": true,
-		}
+		tls := map[string]any{"enabled": true}
 		if n.TLS.ServerName != "" {
 			tls["server_name"] = n.TLS.ServerName
 		}
@@ -517,12 +666,28 @@ func nodeToOutbound(n *config.Node, selfMark string) (map[string]any, error) {
 		if n.TLS.UTLS != "" {
 			tls["utls"] = map[string]any{"enabled": true, "fingerprint": n.TLS.UTLS}
 		}
+		if n.TLS.CertificatePath != "" {
+			tls["certificate_path"] = n.TLS.CertificatePath
+		}
+		if n.TLS.RealityEnabled {
+			tls["reality"] = map[string]any{
+				"enabled":    true,
+				"public_key": n.TLS.RealityPublicKey,
+				"short_id":   n.TLS.RealityShortID,
+			}
+		}
 		ob["tls"] = tls
 	}
 
 	if n.Transport != nil {
-		for k, v := range n.Transport {
-			ob[k] = v
+		// merge raw transport map (overrides structured if both set keys)
+		if existing, ok := ob["transport"].(map[string]any); ok {
+			for k, v := range n.Transport {
+				existing[k] = v
+			}
+			ob["transport"] = existing
+		} else {
+			ob["transport"] = n.Transport
 		}
 	}
 	if n.Extra != nil {

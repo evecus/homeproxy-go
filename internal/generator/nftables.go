@@ -103,17 +103,17 @@ func (n *Nftables) writeSets(b *strings.Builder) {
 		b.WriteString("  }\n\n")
 	}
 
-	// GFW dynamic set (filled by optional DNS module later; reserved)
+	// GFW dynamic set — filled by dnsmasq nftset= when DNSMasq.Enabled
 	b.WriteString("  set gfw_v4 {\n")
 	b.WriteString("    type ipv4_addr\n")
-	b.WriteString("    flags interval, timeout\n")
-	b.WriteString("    auto-merge\n")
+	b.WriteString("    flags timeout\n")
+	b.WriteString("    timeout 1h\n")
 	b.WriteString("  }\n\n")
 	if cfg.Proxy.IPv6 {
 		b.WriteString("  set gfw_v6 {\n")
 		b.WriteString("    type ipv6_addr\n")
-		b.WriteString("    flags interval, timeout\n")
-		b.WriteString("    auto-merge\n")
+		b.WriteString("    flags timeout\n")
+		b.WriteString("    timeout 1h\n")
 		b.WriteString("  }\n\n")
 	}
 

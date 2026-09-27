@@ -13,7 +13,7 @@ clean:
 	rm -rf bin/ dist/
 
 test:
-	go test ./
+	go test ./...
 
 install: build
 	install -Dm755 bin/$(APP) /usr/local/bin/$(APP)

@@ -65,3 +65,25 @@ paths:
 
 log:
   level: warn
+
+# dnsmasq + nftset 精确 GFW（需系统已安装 dnsmasq，并 include /etc/dnsmasq.d/）
+dnsmasq:
+  enabled: false
+  conf_path: /etc/dnsmasq.d/homeproxy-gfw.conf
+  reload_cmd: "systemctl reload dnsmasq"
+  max_domains: 8000
+
+# Clash API（流量统计 / 切换节点）
+clash:
+  enabled: true
+  listen: 127.0.0.1:9090
+  secret: ""
+  store_selected: true
+
+# 本机入站服务（可选）
+servers: []
+#  - name: lan-socks
+#    enabled: true
+#    type: mixed
+#    listen: "::"
+#    port: 1080

@@ -70,12 +70,14 @@ func (m *Manager) UpdateChinaIP6() error {
 }
 
 func (m *Manager) UpdateGFWList() error {
+	// gfwlist is base64-encoded adblock-style list
 	body, err := httpGet(m.Cfg.Paths.GFWListURL)
 	if err != nil {
 		return err
 	}
 	decoded, err := base64.StdEncoding.DecodeString(strings.TrimSpace(string(body)))
 	if err != nil {
+		// maybe already plain
 		decoded = body
 	}
 	domains := parseGFWList(string(decoded))
@@ -160,6 +162,7 @@ func readLines(path string) ([]string, error) {
 	defer f.Close()
 	var lines []string
 	sc := bufio.NewScanner(f)
+	// large china list
 	buf := make([]byte, 0, 64*1024)
 	sc.Buffer(buf, 1024*1024)
 	for sc.Scan() {
@@ -180,6 +183,7 @@ func isIPv6CIDR(s string) bool {
 	return strings.Contains(s, ":")
 }
 
+// parseGFWList extracts domains from gfwlist (adblock syntax).
 func parseGFWList(content string) []string {
 	seen := map[string]struct{}{}
 	var out []string
@@ -189,12 +193,14 @@ func parseGFWList(content string) []string {
 		if line == "" || strings.HasPrefix(line, "!") || strings.HasPrefix(line, "[") {
 			continue
 		}
+		// skip whitelist
 		if strings.HasPrefix(line, "@@") {
 			continue
 		}
 		line = strings.TrimPrefix(line, "||")
 		line = strings.TrimPrefix(line, "|")
 		line = strings.TrimPrefix(line, ".")
+		// strip path
 		if i := strings.IndexAny(line, "/^$*"); i >= 0 {
 			line = line[:i]
 		}
@@ -202,6 +208,7 @@ func parseGFWList(content string) []string {
 		if line == "" || strings.Contains(line, "*") {
 			continue
 		}
+		// basic domain check
 		if !strings.Contains(line, ".") {
 			continue
 		}

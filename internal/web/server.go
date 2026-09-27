@@ -46,7 +46,13 @@ func (s *Server) routes() {
 	s.Mux.HandleFunc("/api/nodes/delete", s.handleDeleteNode)
 	s.Mux.HandleFunc("/api/subscriptions", s.handleSubscriptions)
 	s.Mux.HandleFunc("/api/subscriptions/update", s.handleSubUpdate)
+	s.Mux.HandleFunc("/api/traffic", s.handleTraffic)
+	s.Mux.HandleFunc("/api/dnsmasq-gfw", s.handleDNSMasqGFW)
+	s.Mux.HandleFunc("/api/delay", s.handleDelay)
+	s.Mux.HandleFunc("/api/logs", s.handleLogs)
+	s.Mux.HandleFunc("/api/proxies", s.handleProxies)
 }
+
 
 func (s *Server) Handler() http.Handler {
 	return s.cors(s.Mux)
@@ -344,4 +350,87 @@ func (s *Server) handleSubUpdate(w http.ResponseWriter, r *http.Request) {
 	}
 	_ = s.Mgr.ReloadConfig()
 	writeJSON(w, http.StatusOK, map[string]any{"ok": "updated", "nodes_added": n})
+}
+
+func (s *Server) handleTraffic(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	data, err := s.Mgr.ClashTraffic()
+	if err != nil {
+		writeErr(w, http.StatusBadRequest, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, data)
+}
+
+func (s *Server) handleDNSMasqGFW(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	if err := s.Mgr.Generate(); err != nil {
+		writeErr(w, http.StatusInternalServerError, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"ok": "dnsmasq conf written (via generate)"})
+}
+
+func (s *Server) handleDelay(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet && r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	name := r.URL.Query().Get("name")
+	url := r.URL.Query().Get("url")
+	if r.Method == http.MethodPost {
+		var req struct {
+			Name string `json:"name"`
+			URL  string `json:"url"`
+		}
+		_ = json.NewDecoder(r.Body).Decode(&req)
+		if req.Name != "" {
+			name = req.Name
+		}
+		if req.URL != "" {
+			url = req.URL
+		}
+	}
+	if name == "" {
+		writeErr(w, http.StatusBadRequest, fmt.Errorf("name required"))
+		return
+	}
+	data, err := s.Mgr.ProxyDelay(name, url, 5000)
+	if err != nil {
+		writeErr(w, http.StatusBadRequest, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, data)
+}
+
+func (s *Server) handleLogs(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	text, err := s.Mgr.TailLog(200)
+	if err != nil {
+		writeJSON(w, http.StatusOK, map[string]string{"log": "", "hint": err.Error()})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"log": text})
+}
+
+func (s *Server) handleProxies(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	data, err := s.Mgr.ListProxies()
+	if err != nil {
+		writeErr(w, http.StatusBadRequest, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, data)
 }
