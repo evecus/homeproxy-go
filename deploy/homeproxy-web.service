@@ -1,0 +1,20 @@
+[Unit]
+Description=homeproxy-go web UI and controller
+Documentation=https://github.com/evecus/homeproxy-go
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+# Web panel: configure / start / stop sing-box via browser
+# Optional auth: add --user admin --pass 'your-password'
+ExecStart=/usr/local/bin/homeproxy serve -c /etc/homeproxy/config.yaml -l :8080
+Restart=on-failure
+RestartSec=3
+LimitNOFILE=1048576
+# Root needed for nft / tproxy when starting proxy from UI
+AmbientCapabilities=CAP_NET_ADMIN CAP_NET_BIND_SERVICE CAP_NET_RAW
+CapabilityBoundingSet=CAP_NET_ADMIN CAP_NET_BIND_SERVICE CAP_NET_RAW
+
+[Install]
+WantedBy=multi-user.target
