@@ -66,6 +66,7 @@ type Status struct {
 	MainNode    string `json:"main_node"`
 	SingBoxJSON string `json:"singbox_json"`
 	NftPath     string `json:"nft_path"`
+	Version     string `json:"version,omitempty"`
 }
 
 func (m *Manager) Status() Status {
@@ -83,9 +84,11 @@ func (m *Manager) Status() Status {
 	if pid > 0 && processAlive(pid) {
 		st.Running = true
 		st.PID = pid
-	} else if m.cmd != nil && m.cmd.Process != nil && processAlive(m.cmd.Process.Pid) {
-		st.Running = true
-		st.PID = m.cmd.Process.Pid
+	} else if m.cmd != nil && m.cmd.Process != nil {
+		if processAlive(m.cmd.Process.Pid) {
+			st.Running = true
+			st.PID = m.cmd.Process.Pid
+		}
 	}
 	return st
 }
@@ -147,10 +150,12 @@ func (m *Manager) generateLocked() error {
 	_ = rm.EnsureDir()
 	china4, _ := rm.LoadChinaIP4()
 	china6, _ := rm.LoadChinaIP6()
-	if err := generator.NewSingBox(cfg).Write(filepath.Join(cfg.Paths.RunDir, "sing-box.json")); err != nil {
+	sbPath := filepath.Join(cfg.Paths.RunDir, "sing-box.json")
+	if err := generator.NewSingBox(cfg).Write(sbPath); err != nil {
 		return fmt.Errorf("sing-box: %w", err)
 	}
-	if err := generator.NewNftables(cfg, china4, china6).Write(filepath.Join(cfg.Paths.RunDir, "nftables.nft")); err != nil {
+	nftPath := filepath.Join(cfg.Paths.RunDir, "nftables.nft")
+	if err := generator.NewNftables(cfg, china4, china6).Write(nftPath); err != nil {
 		return fmt.Errorf("nftables: %w", err)
 	}
 	return nil
@@ -183,7 +188,16 @@ func (m *Manager) SetupRouting() error {
 	if err := mustIP("rule", "add", "fwmark", mark, "lookup", "100"); err != nil {
 		return err
 	}
-	return mustIP("route", "add", "local", "default", "dev", "lo", "table", "100")
+	if err := mustIP("route", "add", "local", "default", "dev", "lo", "table", "100"); err != nil {
+		return err
+	}
+	if cfg.Proxy.IPv6 {
+		runIP("-6", "rule", "del", "fwmark", mark, "lookup", "100")
+		runIP("-6", "route", "del", "local", "default", "dev", "lo", "table", "100")
+		_ = mustIP("-6", "rule", "add", "fwmark", mark, "lookup", "100")
+		_ = mustIP("-6", "route", "add", "local", "default", "dev", "lo", "table", "100")
+	}
+	return nil
 }
 
 func (m *Manager) UpdateResources() error {
@@ -213,7 +227,8 @@ func (m *Manager) Start() error {
 		_ = mustIP("route", "add", "local", "default", "dev", "lo", "table", "100")
 	}
 	sbPath := filepath.Join(m.Cfg.Paths.RunDir, "sing-box.json")
-	cmd := exec.Command(m.Cfg.Paths.SingBoxBin, "run", "-c", sbPath)
+	bin := m.Cfg.Paths.SingBoxBin
+	cmd := exec.Command(bin, "run", "-c", sbPath)
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
@@ -236,6 +251,7 @@ func (m *Manager) Start() error {
 func (m *Manager) Stop(flushNft bool) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	var errs []string
 	pid := m.readPID()
 	if pid <= 0 && m.cmd != nil && m.cmd.Process != nil {
 		pid = m.cmd.Process.Pid
@@ -251,7 +267,14 @@ func (m *Manager) Stop(flushNft bool) error {
 	_ = os.Remove(m.pidFile())
 	m.cmd = nil
 	if flushNft {
-		_, _ = exec.Command("nft", "delete", "table", "inet", "homeproxy").CombinedOutput()
+		if out, err := exec.Command("nft", "delete", "table", "inet", "homeproxy").CombinedOutput(); err != nil {
+			if !strings.Contains(string(out), "No such file") && !strings.Contains(string(out), "does not exist") {
+				errs = append(errs, string(out))
+			}
+		}
+	}
+	if len(errs) > 0 {
+		return fmt.Errorf("%s", strings.Join(errs, "; "))
 	}
 	return nil
 }
@@ -262,7 +285,9 @@ func (m *Manager) Restart() error {
 	return m.Start()
 }
 
-func runIP(args ...string) { _ = exec.Command("ip", args...).Run() }
+func runIP(args ...string) {
+	_ = exec.Command("ip", args...).Run()
+}
 
 func mustIP(args ...string) error {
 	out, err := exec.Command("ip", args...).CombinedOutput()
@@ -270,4 +295,96 @@ func mustIP(args ...string) error {
 		return fmt.Errorf("ip %v: %v: %s", args, err, string(out))
 	}
 	return nil
+}
+
+func (m *Manager) SetMainNode(name string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.Cfg.Proxy.MainNode = name
+	return m.Cfg.Save(m.ConfigPath)
+}
+
+func (m *Manager) DeleteNode(name string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	out := m.Cfg.Nodes[:0]
+	for _, n := range m.Cfg.Nodes {
+		if n.Name != name {
+			out = append(out, n)
+		}
+	}
+	m.Cfg.Nodes = out
+	if m.Cfg.Proxy.MainNode == name {
+		m.Cfg.Proxy.MainNode = ""
+		if len(m.Cfg.Nodes) > 0 {
+			m.Cfg.Proxy.MainNode = m.Cfg.Nodes[0].Name
+		}
+	}
+	return m.Cfg.Save(m.ConfigPath)
+}
+
+func (m *Manager) AddSubscription(sub config.Subscription) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if sub.Name == "" || sub.URL == "" {
+		return fmt.Errorf("name and url required")
+	}
+	for _, s := range m.Cfg.Subs {
+		if s.Name == sub.Name {
+			return fmt.Errorf("subscription %q already exists", sub.Name)
+		}
+	}
+	if !sub.Enabled {
+		sub.Enabled = true
+	}
+	m.Cfg.Subs = append(m.Cfg.Subs, sub)
+	return m.Cfg.Save(m.ConfigPath)
+}
+
+func (m *Manager) RemoveSubscription(name string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	out := m.Cfg.Subs[:0]
+	for _, s := range m.Cfg.Subs {
+		if s.Name != name {
+			out = append(out, s)
+		}
+	}
+	m.Cfg.Subs = out
+	return m.Cfg.Save(m.ConfigPath)
+}
+
+func (m *Manager) UpdateSubscription(name string, replace bool) (int, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	total := 0
+	for _, sub := range m.Cfg.Subs {
+		if name != "" && sub.Name != name {
+			continue
+		}
+		if sub.URL == "" {
+			continue
+		}
+		nodes, err := subscription.Fetch(sub.URL)
+		if err != nil {
+			return total, fmt.Errorf("%s: %w", sub.Name, err)
+		}
+		if replace {
+			prefix := sub.Name + "/"
+			kept := m.Cfg.Nodes[:0]
+			for _, n := range m.Cfg.Nodes {
+				if !strings.HasPrefix(n.Name, prefix) {
+					kept = append(kept, n)
+				}
+			}
+			m.Cfg.Nodes = kept
+		}
+		before := len(m.Cfg.Nodes)
+		subscription.MergeNodes(m.Cfg, sub.Name, nodes)
+		total += len(m.Cfg.Nodes) - before
+	}
+	if err := m.Cfg.Save(m.ConfigPath); err != nil {
+		return total, err
+	}
+	return total, nil
 }
